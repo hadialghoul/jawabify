@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Jawabify",
+    "slug": "jawabify",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "jawabify",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#11112C"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jawabify.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Jawabify uses your photo library to send images in chats.",
+        "NSCameraUsageDescription": "Jawabify uses the camera to capture photos for chats."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4F46E5",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.jawabify.app",
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Jawabify uses your photos to send images in chats."
+        }
+      ]
+    ]
+    "extra": {
+      "eas": {
+        "projectId": "jawabify-mobile"
+      }
+    }
+  }
+}
