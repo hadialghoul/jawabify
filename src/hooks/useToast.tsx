@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius } from '../theme';
 
 type ToastKind = 'success' | 'error' | 'info';
@@ -17,6 +18,7 @@ const ToastContext = createContext<ToastContextType>({
 });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
   const [message, setMessage] = useState<string | null>(null);
   const [kind, setKind] = useState<ToastKind>('info');
   const opacity = useMemo(() => new Animated.Value(0), []);
@@ -51,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       {message ? (
-        <Animated.View pointerEvents="none" style={[styles.wrap, { opacity }]}>
+        <Animated.View pointerEvents="none" style={[styles.wrap, { opacity, top: Math.max(insets.top, 24) + 12 }]}>
           <View style={[styles.toast, { backgroundColor: bg }]}>
             <Text style={styles.text}>{message}</Text>
           </View>
@@ -68,7 +70,6 @@ export function useToast() {
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    top: 56,
     left: 16,
     right: 16,
     zIndex: 100,

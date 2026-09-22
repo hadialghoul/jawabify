@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     borderColor: colors.card,
   },
   badgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.overlay },
+  overlay: { ...StyleSheet.absoluteFill, backgroundColor: colors.overlay },
   sheet: {
     position: 'absolute',
     left: 0,

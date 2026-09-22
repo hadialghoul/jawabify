@@ -4,7 +4,7 @@ import { useAuth } from './useAuth';
 import type { Vertical } from '../lib/verticals';
 import type { ChannelFilter } from '../types';
 import { useCachedState, hasCache, isFresh } from '../lib/dataCache';
-import { startOfDay, endOfDay } from 'date-fns';
+import { startOfDay, endOfDay, subDays, format, differenceInCalendarDays } from 'date-fns';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export function useTenantVertical() {
@@ -246,6 +246,15 @@ export function useTodayStats() {
   return { data, loading, refetch: () => fetchStats(true) };
 }
 
+export interface DailyPoint {
+  date: string;
+  label: string;
+  incoming: number;
+  outgoing: number;
+  orders: number;
+  [key: string]: string | number;
+}
+
 export interface AnalyticsData {
   totals: {
     contacts: number;
@@ -260,27 +269,65 @@ export interface AnalyticsData {
     cancelledOrders: number;
     revenue: number;
     returningRate: number;
+    customersWithOrders: number;
+    returningCustomers: number;
   };
+  daily: DailyPoint[];
+  ordersByStatus: { name: string; value: number }[];
+  topProducts: { name: string; orders: number; quantity: number }[];
+  topCustomers: { name: string; phone: string; messages: number }[];
+  hourlyHeatmap: { hour: number; count: number }[];
 }
 
-export function useAnalytics() {
+export type AnalyticsRange = { from: Date; to: Date };
+
+export function defaultAnalyticsRange(): AnalyticsRange {
+  return { from: startOfDay(subDays(new Date(), 29)), to: endOfDay(new Date()) };
+}
+
+export function useAnalytics(range: AnalyticsRange = defaultAnalyticsRange()) {
   const { tenantId } = useAuth();
-  const cacheKey = tenantId ? `analytics-30:${tenantId}` : null;
+  const fromKey = startOfDay(range.from).toISOString();
+  const toKey = endOfDay(range.to).toISOString();
+  const cacheKey = tenantId ? `analytics:${tenantId}:${fromKey}:${toKey}` : null;
   const [data, setData] = useCachedState<AnalyticsData | null>(cacheKey, null);
   const [loading, setLoading] = useState(() => !hasCache(cacheKey));
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchAnalytics = useCallback(async (force = false) => {
     if (!tenantId) {
       setData(null);
       setLoading(false);
       return;
     }
+    if (!force && isFresh(cacheKey, 60_000)) {
+      setLoading(false);
+      return;
+    }
+    if (!hasCache(cacheKey)) setLoading(true);
     try {
-      const from = startOfDay(new Date(Date.now() - 29 * 86400000)).toISOString();
-      const to = endOfDay(new Date()).toISOString();
-      const { data: raw, error } = await supabase.rpc('get_tenant_analytics', { p_tenant_id: tenantId, p_from: from, p_to: to });
+      const days = differenceInCalendarDays(new Date(toKey), new Date(fromKey)) + 1;
+      const { data: raw, error } = await supabase.rpc('get_tenant_analytics', { p_tenant_id: tenantId, p_from: fromKey, p_to: toKey });
       if (error) throw error;
       const r: any = raw || {};
+      const dailyMap = new Map<string, DailyPoint>();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = startOfDay(subDays(new Date(toKey), i));
+        dailyMap.set(format(d, 'yyyy-MM-dd'), {
+          date: d.toISOString(),
+          label: format(d, 'MMM d'),
+          incoming: 0,
+          outgoing: 0,
+          orders: 0,
+        });
+      }
+      (r.daily ?? []).forEach((row: any) => {
+        const key = format(startOfDay(new Date(row.date)), 'yyyy-MM-dd');
+        const b = dailyMap.get(key);
+        if (!b) return;
+        b.incoming = row.incoming ?? 0;
+        b.outgoing = row.outgoing ?? 0;
+        b.orders = row.orders ?? 0;
+      });
       const customersWithOrders = r.customersWithOrders ?? 0;
       const returningCustomers = r.returningCustomers ?? 0;
       setData({
@@ -297,18 +344,25 @@ export function useAnalytics() {
           cancelledOrders: r.cancelledOrders ?? 0,
           revenue: Number(r.revenue ?? 0),
           returningRate: customersWithOrders > 0 ? Math.round((returningCustomers / customersWithOrders) * 100) : 0,
+          customersWithOrders,
+          returningCustomers,
         },
+        daily: Array.from(dailyMap.values()),
+        ordersByStatus: r.ordersByStatus ?? [],
+        topProducts: r.topProducts ?? [],
+        topCustomers: r.topCustomers ?? [],
+        hourlyHeatmap: r.hourlyHeatmap ?? [],
       });
     } catch {
       /* ignore */
     } finally {
       setLoading(false);
     }
-  }, [tenantId, setData]);
+  }, [tenantId, fromKey, toKey, cacheKey, setData]);
 
   useEffect(() => {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
-  return { data, loading, refetch: fetchAnalytics };
+  return { data, loading, refetch: () => fetchAnalytics(true) };
 }

@@ -1,24 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AlertCircle, Check, Megaphone, RefreshCw } from 'lucide-react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AlertCircle, Check } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
-import { actingHeaders } from '../../lib/actingTenant';
 import { colors, radius } from '../../theme';
 import { Badge, Button } from '../ui';
 import { useToast } from '../../hooks/useToast';
-import { formatDistanceToNow } from 'date-fns';
-
-interface Campaign {
-  id: string;
-  name: string;
-  template_name: string;
-  status: string;
-  total_recipients: number;
-  sent_count: number;
-  failed_count: number;
-  created_at: string;
-}
 
 interface Incident {
   id: string;
@@ -29,63 +16,6 @@ interface Incident {
   resolved: boolean;
   created_at: string;
   contacts?: { name: string | null; phone_number: string | null } | null;
-}
-
-export function CampaignsPanel() {
-  const { tenantId } = useAuth();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    if (!tenantId) {
-      setCampaigns([]);
-      setLoading(false);
-      return;
-    }
-    const { data } = await supabase.from('campaigns').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50);
-    setCampaigns((data as Campaign[]) || []);
-    setLoading(false);
-  }, [tenantId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (loading) return <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />;
-
-  return (
-    <ScrollView contentContainerStyle={styles.pad}>
-      <View style={styles.head}>
-        <View>
-          <Text style={styles.h1}>Campaigns</Text>
-          <Text style={styles.sub}>Bulk WhatsApp template messages.</Text>
-        </View>
-        <Pressable onPress={load} style={styles.icon}>
-          <RefreshCw size={16} color={colors.primary} />
-        </Pressable>
-      </View>
-      {campaigns.length === 0 ? (
-        <View style={styles.empty}>
-          <Megaphone size={36} color={colors.mutedForeground} />
-          <Text style={styles.emptyTitle}>No campaigns yet</Text>
-        </View>
-      ) : (
-        campaigns.map((c) => (
-          <View key={c.id} style={styles.card}>
-            <Text style={styles.name}>{c.name}</Text>
-            <Text style={styles.sub}>{c.template_name}</Text>
-            <View style={styles.row}>
-              <Badge label={c.status} tone={c.status === 'completed' ? 'success' : 'primary'} />
-              <Text style={styles.meta}>
-                {c.sent_count}/{c.total_recipients} sent · {c.failed_count} failed
-              </Text>
-            </View>
-            <Text style={styles.meta}>{formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}</Text>
-          </View>
-        ))
-      )}
-    </ScrollView>
-  );
 }
 
 export function AIIssuesPanel({ onSelectByPhone }: { onSelectByPhone?: (phone: string) => void }) {
@@ -169,8 +99,13 @@ export function VerticalRecordsPanel({ table, title, fields }: { table: string; 
   useEffect(() => {
     if (!tenantId) return;
     (async () => {
-      const { data } = await supabase.from(table as any).select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100);
-      setRows(data || []);
+      const first = await supabase.from(table as any).select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100);
+      if (first.error) {
+        const fallback = await supabase.from(table as any).select('*').eq('tenant_id', tenantId).limit(100);
+        setRows(fallback.data || []);
+      } else {
+        setRows(first.data || []);
+      }
       setLoading(false);
     })();
   }, [tenantId, table]);

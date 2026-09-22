@@ -1,13 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Check, Eye, EyeOff, X } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -16,6 +8,7 @@ import { WEB_ORIGIN } from '../config';
 import { VERTICALS } from '../lib/verticals';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
+import { KeyboardScreen } from '../components/KeyboardSheet';
 
 const HEARD_ABOUT = ['Facebook', 'Instagram', 'TikTok', 'Marketing email', 'Ads', 'Search Engines', 'Word of mouth', 'Other'] as const;
 
@@ -164,9 +157,8 @@ export function AuthScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
-        <View style={styles.logoRow}>
+    <KeyboardScreen>
+      <View style={styles.logoRow}>
           <View style={styles.logoMark}>
             <View style={styles.logoDot} />
           </View>
@@ -290,15 +282,13 @@ export function AuthScreen() {
             </Pressable>
           </Card>
         )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
-  pad: { flexGrow: 1, justifyContent: 'center', padding: 20, backgroundColor: colors.background, gap: 16 },
-  logoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8, marginTop: 12 },
   logoMark: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   logoDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
   brand: { fontSize: 22, fontWeight: '800', color: colors.foreground },

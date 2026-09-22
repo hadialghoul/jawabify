@@ -14,6 +14,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
   Ban,
@@ -21,16 +22,22 @@ import {
   BotOff,
   Eraser,
   Flag,
+  Image as ImageIcon,
+  MessageCircle,
   MoreVertical,
   Paperclip,
   Send,
+  ShoppingCart,
   Sparkles,
   Trash2,
+  User,
 } from 'lucide-react-native';
 import type { Contact, Message, MediaFile } from '../types';
 import { avatarColor, colors, initials, radius } from '../theme';
 import { MessageBubble } from './MessageBubble';
 import { Button } from './ui';
+import { useSafeHeaderPad } from './ScreenHeader';
+import { InstagramIcon } from './ChannelIcons';
 
 function dateLabel(date: Date) {
   if (isToday(date)) return 'Today';
@@ -53,6 +60,7 @@ interface Props {
   onToggleNeedsHuman?: (contactId: string, needsHuman: boolean) => Promise<boolean> | void;
   onClearChat?: (contactId: string) => Promise<boolean>;
   onToggleBlocked?: (contactId: string, blocked: boolean) => Promise<boolean>;
+  onCreateOrder?: () => void;
 }
 
 export function ChatWindow({
@@ -68,11 +76,14 @@ export function ChatWindow({
   onToggleNeedsHuman,
   onClearChat,
   onToggleBlocked,
+  onCreateOrder,
 }: Props) {
   const [inputValue, setInputValue] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
   const palette = avatarColor(contact.id || contact.name);
+  const headerPad = useSafeHeaderPad();
+  const insets = useSafeAreaInsets();
 
   const replyWindowClosed = useMemo(() => {
     if (contact.platform === 'instagram') return false;
@@ -128,21 +139,37 @@ export function ChatWindow({
 
   return (
     <KeyboardAvoidingView style={styles.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.iconBtn}>
+      <View style={[styles.header, { paddingTop: headerPad }]}>
+        <Pressable onPress={onBack} hitSlop={16} style={styles.iconBtn}>
           <ArrowLeft size={22} color="#fff" />
         </Pressable>
         <View style={[styles.avatar, { backgroundColor: palette.bg }]}>
           <Text style={[styles.avatarText, { color: palette.fg }]}>{initials(contact.name)}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={styles.title}>
-            {contact.name}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text numberOfLines={1} style={styles.title}>
+              {contact.name}
+            </Text>
+            {contact.platform === 'instagram' ? <InstagramIcon size={14} color="#fff" /> : <MessageCircle size={14} color="rgba(255,255,255,0.85)" />}
+          </View>
           <Text numberOfLines={1} style={styles.sub}>
-            {contact.phoneNumber}
+            {contact.platform === 'instagram'
+              ? contact.handle
+                ? `@${contact.handle}`
+                : 'Instagram direct message'
+              : contact.phoneNumber}
           </Text>
         </View>
+        {onToggleInterested ? (
+          <Pressable
+            onPress={() => onToggleInterested(contact.id, !contact.isInterested)}
+            hitSlop={10}
+            style={styles.iconBtn}
+          >
+            <Sparkles size={20} color={contact.isInterested ? '#FDE047' : '#fff'} />
+          </Pressable>
+        ) : null}
         {onToggleAiEnabled ? (
           <Pressable
             onPress={() => onToggleAiEnabled(contact.id, !(contact.aiEnabled !== false))}
@@ -185,8 +212,11 @@ export function ChatWindow({
         </View>
       ) : null}
 
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <Pressable onPress={pickImage} style={styles.iconBtnLight}>
+          <ImageIcon size={20} color={colors.mutedForeground} />
+        </Pressable>
+        <Pressable onPress={pickFile} style={styles.iconBtnLight}>
           <Paperclip size={20} color={colors.mutedForeground} />
         </Pressable>
         <TextInput
@@ -204,7 +234,17 @@ export function ChatWindow({
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setMenuOpen(false)} />
-        <View style={styles.menu}>
+        <View style={[styles.menu, { top: headerPad + 52 }]}>
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => {
+              setMenuOpen(false);
+              Alert.alert(contact.name, [contact.phoneNumber, contact.email, contact.address].filter(Boolean).join('\n') || 'No extra profile details');
+            }}
+          >
+            <User size={16} color={colors.foreground} />
+            <Text style={styles.menuText}>View profile</Text>
+          </Pressable>
           <Pressable
             style={styles.menuItem}
             onPress={() => {
@@ -215,6 +255,18 @@ export function ChatWindow({
             <Sparkles size={16} color={colors.primary} />
             <Text style={styles.menuText}>{contact.isInterested ? 'Unmark interested' : 'Mark interested'}</Text>
           </Pressable>
+          {onCreateOrder ? (
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                onCreateOrder();
+              }}
+            >
+              <ShoppingCart size={16} color={colors.foreground} />
+              <Text style={styles.menuText}>Create order</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.menuItem}
             onPress={() => {
@@ -222,7 +274,7 @@ export function ChatWindow({
               onToggleNeedsHuman?.(contact.id, !contact.needsHuman);
             }}
           >
-            <Flag size={16} color={colors.destructive} />
+            <Flag size={16} color={contact.needsHuman ? colors.destructive : colors.mutedForeground} />
             <Text style={styles.menuText}>{contact.needsHuman ? 'Remove flag' : 'Flag for human'}</Text>
           </Pressable>
           <Pressable
@@ -280,15 +332,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.header,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingHorizontal: 6,
+    paddingBottom: 10,
     gap: 8,
   },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   iconBtnLight: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 12, fontWeight: '700' },
-  title: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  title: { color: '#fff', fontWeight: '700', fontSize: 15, flexShrink: 1 },
   sub: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   list: { flex: 1 },
   dateWrap: { alignItems: 'center', marginVertical: 10 },
@@ -313,7 +366,7 @@ const styles = StyleSheet.create({
     color: colors.foreground,
   },
   send: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.overlay },
+  overlay: { ...StyleSheet.absoluteFill, backgroundColor: colors.overlay },
   menu: {
     position: 'absolute',
     right: 16,

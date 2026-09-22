@@ -29,7 +29,12 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.jawabify.app",
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES"]
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#11112C",
+      "barStyle": "light-content",
+      "translucent": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -40,12 +45,8 @@
         {
           "photosPermission": "Jawabify uses your photos to send images in chats."
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
-    "extra": {
-      "eas": {
-        "projectId": "jawabify-mobile"
-      }
-    }
   }
 }

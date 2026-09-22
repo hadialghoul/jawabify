@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatDistanceToNow } from 'date-fns';
-import { Check, Clock, Loader2, Package, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react-native';
+import { Package, Plus, RefreshCw, Trash2 } from 'lucide-react-native';
 import type { Contact, Order } from '../../types';
 import { colors, radius } from '../../theme';
 import { Badge, Button, Input } from '../ui';
 import { supabase } from '../../lib/supabase';
 import { actingHeaders } from '../../lib/actingTenant';
 import { useToast } from '../../hooks/useToast';
+import { KeyboardSheet } from '../KeyboardSheet';
 
 const STATUS: Record<Order['status'], { label: string; tone: 'amber' | 'primary' | 'success' | 'danger' }> = {
   pending: { label: 'Pending', tone: 'amber' },
@@ -105,25 +106,23 @@ export function OrdersPanel({
           ))
         )}
       </ScrollView>
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <View style={styles.modal}>
-          <Text style={styles.h1}>New order</Text>
-          <Input placeholder="Customer name" value={form.customerName} onChangeText={(v) => setForm({ ...form, customerName: v })} />
-          <Input placeholder="Phone" value={form.customerPhone} onChangeText={(v) => setForm({ ...form, customerPhone: v })} />
-          <Input placeholder="Address" value={form.customerAddress} onChangeText={(v) => setForm({ ...form, customerAddress: v })} />
-          <Input placeholder="Product" value={form.productName} onChangeText={(v) => setForm({ ...form, productName: v })} />
-          <Input placeholder="Quantity" keyboardType="number-pad" value={form.quantity} onChangeText={(v) => setForm({ ...form, quantity: v })} />
-          <Button
-            title="Create order"
-            onPress={async () => {
-              await onCreateOrder({ ...form, quantity: Number(form.quantity) || 1 });
-              setOpen(false);
-              setForm({ customerName: '', customerAddress: '', customerPhone: '', productName: '', quantity: '1' });
-            }}
-          />
-          <Button title="Cancel" variant="ghost" onPress={() => setOpen(false)} />
-        </View>
-      </Modal>
+      <KeyboardSheet visible={open} onClose={() => setOpen(false)}>
+        <Text style={styles.h1}>New order</Text>
+        <Input placeholder="Customer name" value={form.customerName} onChangeText={(v) => setForm({ ...form, customerName: v })} />
+        <Input placeholder="Phone" value={form.customerPhone} onChangeText={(v) => setForm({ ...form, customerPhone: v })} keyboardType="phone-pad" />
+        <Input placeholder="Address" value={form.customerAddress} onChangeText={(v) => setForm({ ...form, customerAddress: v })} />
+        <Input placeholder="Product" value={form.productName} onChangeText={(v) => setForm({ ...form, productName: v })} />
+        <Input placeholder="Quantity" keyboardType="number-pad" value={form.quantity} onChangeText={(v) => setForm({ ...form, quantity: v })} />
+        <Button
+          title="Create order"
+          onPress={async () => {
+            await onCreateOrder({ ...form, quantity: Number(form.quantity) || 1 });
+            setOpen(false);
+            setForm({ customerName: '', customerAddress: '', customerPhone: '', productName: '', quantity: '1' });
+          }}
+        />
+        <Button title="Cancel" variant="ghost" onPress={() => setOpen(false)} />
+      </KeyboardSheet>
     </View>
   );
 }
@@ -148,5 +147,4 @@ const styles = StyleSheet.create({
   statusChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 4 },
   statusChipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   statusText: { fontSize: 11, fontWeight: '700', color: colors.mutedForeground },
-  modal: { marginTop: 'auto', backgroundColor: colors.card, padding: 16, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
 });

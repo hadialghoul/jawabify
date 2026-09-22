@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -8,6 +8,7 @@ import { VERTICALS, type Vertical } from '../lib/verticals';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
 import { WEB_ORIGIN } from '../config';
+import { KeyboardScreen } from '../components/KeyboardSheet';
 
 export function OnboardingScreen() {
   const { user, tenantId, refreshContext, signOut } = useAuth();
@@ -57,7 +58,7 @@ export function OnboardingScreen() {
   }, [user, tenantId, createdTenantId, vertical, toast]);
 
   return (
-    <ScrollView contentContainerStyle={styles.pad}>
+    <KeyboardScreen>
       <Text style={styles.brand}>Jawabify</Text>
       <Card>
         {step === 'identity' ? (
@@ -168,13 +169,12 @@ export function OnboardingScreen() {
         ) : null}
         <Button title="Sign out" variant="ghost" onPress={signOut} />
       </Card>
-    </ScrollView>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  pad: { flexGrow: 1, justifyContent: 'center', padding: 20, backgroundColor: colors.background, gap: 16 },
-  brand: { textAlign: 'center', fontSize: 22, fontWeight: '800', color: colors.foreground },
+  brand: { textAlign: 'center', fontSize: 22, fontWeight: '800', color: colors.foreground, marginTop: 12 },
   title: { fontSize: 20, fontWeight: '800', color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, lineHeight: 18 },
   label: { fontWeight: '700', color: colors.foreground },

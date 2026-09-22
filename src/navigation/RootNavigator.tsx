@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
 import { AuthScreen } from '../screens/AuthScreen';
@@ -5,11 +6,11 @@ import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { MainScreen } from '../screens/MainScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { AccountScreen } from '../screens/AccountScreen';
+import { SuperAdminScreen } from '../screens/SuperAdminScreen';
 import { colors } from '../theme';
-import { useState } from 'react';
 
 export function RootNavigator() {
-  const { user, tenantId, isSuperAdmin, loading } = useAuth();
+  const { user, tenantId, isSuperAdmin, isActingAs, loading } = useAuth();
   const [page, setPage] = useState<'app' | 'settings' | 'account'>('app');
 
   if (loading) {
@@ -22,12 +23,25 @@ export function RootNavigator() {
   }
 
   if (!user) return <AuthScreen />;
-  if (!tenantId && !isSuperAdmin) return <OnboardingScreen />;
 
   if (page === 'settings') return <SettingsScreen onBack={() => setPage('app')} />;
   if (page === 'account') return <AccountScreen onBack={() => setPage('app')} />;
 
-  return <MainScreen onOpenSettings={() => setPage('settings')} onOpenAccount={() => setPage('account')} />;
+  if (isSuperAdmin && !isActingAs) {
+    return (
+      <SuperAdminScreen onOpenSettings={() => setPage('settings')} onOpenAccount={() => setPage('account')} />
+    );
+  }
+
+  if (!tenantId) return <OnboardingScreen />;
+
+  return (
+    <MainScreen
+      key={tenantId ?? 'main'}
+      onOpenSettings={() => setPage('settings')}
+      onOpenAccount={() => setPage('account')}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

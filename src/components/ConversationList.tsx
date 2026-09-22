@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
-import { MessageSquarePlus, Search, UserCheck } from 'lucide-react-native';
+import { MessageCircle, MessageSquarePlus, Search, UserCheck } from 'lucide-react-native';
+import { InstagramIcon } from './ChannelIcons';
 import type { ChannelFilter, Contact } from '../types';
 import { avatarColor, colors, initials, radius } from '../theme';
 import { Input } from './ui';
@@ -134,6 +135,11 @@ export function ConversationList({
                 }}
                 style={[styles.pill, active && styles.pillActive]}
               >
+                {key === 'instagram' ? (
+                  <InstagramIcon size={12} color={active ? colors.primary : colors.mutedForeground} />
+                ) : key === 'whatsapp' ? (
+                  <MessageCircle size={12} color={active ? colors.primary : colors.mutedForeground} />
+                ) : null}
                 <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
               </Pressable>
             );
@@ -158,13 +164,18 @@ export function ConversationList({
           <ActivityIndicator color={colors.primary} />
           <Text style={styles.emptyText}>Loading conversations…</Text>
         </View>
+      ) : contacts.length === 0 ? (
+        <View style={styles.empty}>
+          <MessageCircle size={36} color={colors.mutedForeground} />
+          <Text style={styles.emptyText}>No conversations yet for this account.</Text>
+        </View>
       ) : contacts.length > 0 && visibleContacts.length === 0 && remoteSearching ? (
         <View style={styles.empty}>
           <ActivityIndicator color={colors.primary} />
           <Text style={styles.emptyText}>Searching all conversations…</Text>
         </View>
       ) : contacts.length > 0 && visibleContacts.length === 0 ? (
-        <Text style={styles.emptyText}>No conversations match “{searchQuery.trim()}”.</Text>
+        <Text style={styles.emptyText}>No conversations match "{searchQuery.trim()}".</Text>
       ) : (
         <FlatList
           data={visibleContacts}
@@ -239,7 +250,7 @@ const styles = StyleSheet.create({
   search: { paddingLeft: 36, paddingRight: 40, backgroundColor: colors.muted, borderColor: 'transparent', minHeight: 36 },
   newBtn: { position: 'absolute', right: 20, top: 18, height: 28, width: 28, alignItems: 'center', justifyContent: 'center' },
   pills: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 8, backgroundColor: colors.muted, borderRadius: radius.md, padding: 4, gap: 4 },
-  pill: { flex: 1, borderRadius: 8, paddingVertical: 6, alignItems: 'center' },
+  pill: { flex: 1, borderRadius: 8, paddingVertical: 6, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 4 },
   pillActive: { backgroundColor: colors.card },
   pillText: { fontSize: 11, fontWeight: '700', color: colors.mutedForeground },
   pillTextActive: { color: colors.foreground },

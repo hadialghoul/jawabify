@@ -90,7 +90,13 @@ export function useMessages() {
       (supabase.rpc as any)('get_unread_contact_ids', { p_tenant_id: tenantId, p_limit: 2000 }).then((r: any) => r, () => ({ data: [] })),
     ]);
     const { data, error } = contactsRes as any;
-    if (error || !data || data.length === 0) {
+    if (error) {
+      toast.error(error.message || 'Failed to load conversations');
+      setContacts([]);
+      setPreviewedCount(0);
+      return;
+    }
+    if (!data || data.length === 0) {
       setContacts([]);
       setPreviewedCount(0);
       return;
@@ -102,7 +108,7 @@ export function useMessages() {
     );
     setContacts(await enrichContactsWithPreviews(data, initialIds));
     setPreviewedCount(Math.min(INITIAL_PREVIEW_COUNT, data.length));
-  }, [tenantId, enrichContactsWithPreviews]);
+  }, [tenantId, enrichContactsWithPreviews, toast]);
 
   const searchContacts = useCallback(
     async (query: string): Promise<Contact[]> => {
