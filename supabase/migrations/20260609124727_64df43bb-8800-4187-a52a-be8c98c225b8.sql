@@ -1,0 +1,12 @@
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.menu_categories TO authenticated;
+GRANT ALL ON public.menu_categories TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.menu_items TO authenticated;
+GRANT ALL ON public.menu_items TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bills TO authenticated;
+GRANT ALL ON public.bills TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bill_items TO authenticated;
+GRANT ALL ON public.bill_items TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.reservations TO authenticated;
+GRANT ALL ON public.reservations TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.restaurant_tables TO authenticated;
+GRANT ALL ON public.restaurant_tables TO service_role;

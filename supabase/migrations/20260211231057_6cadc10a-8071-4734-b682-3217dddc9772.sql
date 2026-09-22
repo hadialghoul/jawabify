@@ -1,0 +1,12 @@
+
+-- Re-enable RLS on all tables (policies are already permissive)
+ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tenant_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tenant_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_knowledge ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.knowledge_images ENABLE ROW LEVEL SECURITY;

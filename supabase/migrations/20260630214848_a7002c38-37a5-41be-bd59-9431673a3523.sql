@@ -1,0 +1,2 @@
+ALTER TABLE public.order_sessions ADD COLUMN IF NOT EXISTS flow_kind text NOT NULL DEFAULT 'order';
+CREATE INDEX IF NOT EXISTS idx_order_sessions_tenant_contact_kind ON public.order_sessions(tenant_id, contact_id, flow_kind);

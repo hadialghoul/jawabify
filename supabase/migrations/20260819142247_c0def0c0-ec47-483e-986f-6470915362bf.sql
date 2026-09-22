@@ -1,0 +1,1 @@
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS variable_fallbacks text[] NOT NULL DEFAULT '{}'::text[];

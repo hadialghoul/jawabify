@@ -1,0 +1,2 @@
+DELETE FROM public.orders a USING public.orders b WHERE a.shopify_order_id IS NOT NULL AND a.tenant_id = b.tenant_id AND a.shopify_order_id = b.shopify_order_id AND a.created_at > b.created_at;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_tenant_shopify_unique ON public.orders (tenant_id, shopify_order_id) WHERE shopify_order_id IS NOT NULL;

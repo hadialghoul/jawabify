@@ -1,0 +1,1 @@
+DELETE FROM public.order_sessions WHERE state NOT IN ('done','cancelled') AND expires_at < now();

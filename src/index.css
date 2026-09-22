@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Midnight Indigo — light surface */
+    --background: 240 33% 98%;        /* near white with indigo tint */
+    --foreground: 240 40% 8%;         /* #0a0a1a */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 40% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 40% 8%;
+
+    --primary: 243 75% 59%;           /* #4f46e5 electric indigo */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 20% 96%;
+    --secondary-foreground: 243 50% 20%;
+
+    --muted: 240 20% 96%;
+    --muted-foreground: 240 10% 42%;
+
+    --accent: 243 100% 97%;
+    --accent-foreground: 243 75% 40%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 15% 91%;
+    --input: 240 15% 91%;
+    --ring: 243 75% 59%;
+
+    --radius: 0.9rem;
+
+    /* Marketing gradients & effects */
+    --hero-glow: radial-gradient(ellipse 80% 60% at 50% 0%, hsl(243 75% 59% / 0.18), transparent 70%);
+    --gradient-primary: linear-gradient(135deg, hsl(243 75% 59%), hsl(258 80% 65%));
+    --gradient-ink: linear-gradient(180deg, hsl(240 40% 8%), hsl(240 45% 4%));
+    --shadow-elegant: 0 20px 60px -25px hsl(243 75% 59% / 0.35);
+    --shadow-card: 0 1px 2px hsl(240 20% 20% / 0.04), 0 8px 24px -12px hsl(240 30% 20% / 0.08);
+
+    /* Chat tokens (kept for app) */
+    --message-sent: 243 75% 59%;
+    --message-sent-foreground: 0 0% 100%;
+    --message-received: 0 0% 100%;
+    --message-received-foreground: 240 40% 8%;
+    --chat-bg: 240 20% 96%;
+    --sidebar-bg: 0 0% 100%;
+    --header-bg: 240 45% 12%;
+    --header-foreground: 0 0% 100%;
+    --online-indicator: 158 64% 52%;
+    --typing-indicator: 243 75% 59%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 40% 8%;
+    --sidebar-primary: 243 75% 59%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 20% 96%;
+    --sidebar-accent-foreground: 243 75% 40%;
+    --sidebar-border: 240 15% 91%;
+    --sidebar-ring: 243 75% 59%;
+  }
+
+  .dark {
+    --background: 240 45% 4%;
+    --foreground: 240 20% 96%;
+
+    --card: 240 40% 7%;
+    --card-foreground: 240 20% 96%;
+
+    --popover: 240 40% 7%;
+    --popover-foreground: 240 20% 96%;
+
+    --primary: 243 85% 70%;
+    --primary-foreground: 240 45% 4%;
+
+    --secondary: 240 30% 12%;
+    --secondary-foreground: 240 20% 96%;
+
+    --muted: 240 30% 12%;
+    --muted-foreground: 240 10% 65%;
+
+    --accent: 243 60% 18%;
+    --accent-foreground: 240 20% 96%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 25% 15%;
+    --input: 240 25% 15%;
+    --ring: 243 85% 70%;
+
+    --message-sent: 243 75% 59%;
+    --message-sent-foreground: 0 0% 100%;
+    --message-received: 240 30% 12%;
+    --message-received-foreground: 240 20% 96%;
+    --chat-bg: 240 45% 5%;
+    --sidebar-bg: 240 40% 7%;
+    --header-bg: 240 45% 8%;
+    --header-foreground: 0 0% 100%;
+    --online-indicator: 158 64% 52%;
+
+    --sidebar-background: 240 40% 7%;
+    --sidebar-foreground: 240 20% 96%;
+    --sidebar-primary: 243 85% 70%;
+    --sidebar-primary-foreground: 240 45% 4%;
+    --sidebar-accent: 243 60% 18%;
+    --sidebar-accent-foreground: 240 20% 96%;
+    --sidebar-border: 240 25% 15%;
+    --sidebar-ring: 243 85% 70%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+
+  html, body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Epilogue', system-ui, -apple-system, sans-serif;
+    overscroll-behavior-x: none;
+    max-width: 100%;
+    min-height: 100%;
+    scroll-padding-top: 5rem;
+    scroll-behavior: smooth;
+  }
+
+  /* Keep horizontal overflow clipped on the document only. Setting
+     overflow-x on <body> too can promote it to its own scroll container in
+     some mobile browsers, which makes the page feel stuck. */
+  html {
+    overflow-x: clip;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body {
+    overflow-y: visible;
+  }
+
+  #root {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: 'Urbanist', system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .message-bubble-sent { @apply bg-[hsl(var(--message-sent))] text-[hsl(var(--message-sent-foreground))]; }
+  .message-bubble-received { @apply bg-[hsl(var(--message-received))] text-[hsl(var(--message-received-foreground))]; }
+
+  .chat-background {
+    background-color: hsl(var(--chat-bg));
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234f46e5' fill-opacity='0.04'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3Ccircle cx='10' cy='10' r='1.5'/%3E%3Ccircle cx='50' cy='50' r='1.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent; }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background-color: hsl(var(--muted-foreground) / 0.3); border-radius: 3px; }
+
+  @media (max-width: 640px) {
+    input, textarea, select { font-size: 16px !important; }
+  }
+
+  /* Marketing utilities */
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(240 40% 8%), hsl(243 75% 45%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .gradient-text-invert {
+    background: linear-gradient(135deg, #fff, hsl(243 60% 80%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .glass {
+    background: hsl(0 0% 100% / 0.6);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid hsl(240 20% 90% / 0.6);
+  }
+  .glass-dark {
+    background: hsl(240 40% 8% / 0.6);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid hsl(240 30% 30% / 0.4);
+  }
+  .card-elevated {
+    box-shadow: var(--shadow-card);
+  }
+  .hero-glow::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--hero-glow);
+    pointer-events: none;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(hsl(240 15% 88%) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(240 15% 88%) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black, transparent 80%);
+  }
+  .noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+.safe-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-left { padding-left: env(safe-area-inset-left, 0px); }
+.safe-right { padding-right: env(safe-area-inset-right, 0px); }
+
+@keyframes slideInRight { from { opacity: 0; transform: translateX(20px);} to { opacity:1; transform:translateX(0);} }
+@keyframes slideInLeft { from { opacity: 0; transform: translateX(-20px);} to { opacity:1; transform:translateX(0);} }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(16px);} to { opacity:1; transform:translateY(0);} }
+@keyframes floatY { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-8px);} }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
+.animate-slide-in-left { animation: slideInLeft 0.3s ease-out; }
+.animate-fade-in { animation: fadeIn 0.4s ease-out; }
+.animate-fade-up { animation: fadeUp 0.6s ease-out both; }
+.animate-float { animation: floatY 6s ease-in-out infinite; }
+
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2; }
+
+.cv-auto { content-visibility: auto; contain-intrinsic-size: 800px; }
+
+/* Hide native browser password reveal icons (Edge/IE, Chrome) so only our eye toggle shows */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear,
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-textfield-decoration-container { display: none !important; visibility: hidden; pointer-events: none; }

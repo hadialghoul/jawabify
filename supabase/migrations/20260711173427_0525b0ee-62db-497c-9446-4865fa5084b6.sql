@@ -1,0 +1,1 @@
+UPDATE public.subscriptions SET status='canceled', current_period_end=now() - interval '1 day' WHERE user_id='f50e0d4c-8862-49ed-9bdb-977f3002a50d' AND environment='sandbox' AND status='active';

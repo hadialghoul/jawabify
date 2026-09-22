@@ -1,0 +1,2 @@
+UPDATE public.orders SET customer_name = 'Fatima Abdulnabi' WHERE display_id = 2506 AND customer_name = 'hyda';
+UPDATE public.contacts SET name = 'Fatima Abdulnabi' WHERE phone_number = '+96171538837' AND name = 'hyda';

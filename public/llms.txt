@@ -1,0 +1,22 @@
+# Jawabify
+
+> AI-powered WhatsApp customer messaging for businesses — automate replies, orders, bookings, and campaigns with a multilingual assistant.
+
+Jawabify connects to the Meta WhatsApp Cloud API and lets businesses run customer support, take orders, send marketing campaigns, and integrate with Shopify, all from one inbox with an AI assistant that learns from your products and FAQs.
+
+## Pages
+
+- [Home](/): Product overview, features, pricing, testimonials, and live sandbox.
+- [Features](/features): Detailed feature breakdown — AI assistant, analytics, CRM, orders, bookings, campaigns, and team inbox.
+- [How it works](/how-it-works): Seven-step setup timeline from WhatsApp connection to live AI replies.
+- [Industries](/industries): Vertical solutions for e-commerce, restaurants, real estate, healthcare, wellness, education, and services.
+- [Pricing](/pricing): Starter, Growth, and Enterprise plans with a 7-day free trial.
+- [Product info](/info): Detailed features, supported verticals, setup steps, and FAQ in English, Arabic, and French.
+- [WhatsApp Business API guide](/blog/whatsapp-business-api-guide): Guide to the Cloud API, messaging limits, templates, and MENA-specific setup.
+- [WhatsApp pricing guide](/blog/whatsapp-conversation-pricing-guide): Conversation-based pricing, the 24-hour window, and cost-control tactics.
+- [About](/about): Company background and mission.
+- [FAQ](/faq): Common questions about the platform.
+- [Contact](/contact): Sales and support contact form.
+- [Privacy Policy](/privacy): How Jawabify handles customer and business data.
+- [Terms](/terms): Terms of service.
+- [Sign in](/auth): Sign in or create a Jawabify account.

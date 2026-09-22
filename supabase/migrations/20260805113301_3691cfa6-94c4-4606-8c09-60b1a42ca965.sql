@@ -1,0 +1,1 @@
+delete from messages where contact_id in (select id from contacts where tenant_id='4ac1840c-dd2b-496c-b238-e700a49f8fda' and phone_number like '%96170000001%'); delete from contacts where tenant_id='4ac1840c-dd2b-496c-b238-e700a49f8fda' and phone_number like '%96170000001%';

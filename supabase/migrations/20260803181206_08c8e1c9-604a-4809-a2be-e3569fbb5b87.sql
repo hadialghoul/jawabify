@@ -1,0 +1,1 @@
+update public.ai_incidents set resolved = true, updated_at = now() where resolved = false and reason like 'AI API error 402%';

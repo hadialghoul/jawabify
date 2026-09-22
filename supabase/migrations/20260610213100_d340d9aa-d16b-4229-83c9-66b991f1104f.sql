@@ -1,0 +1,1 @@
+UPDATE public.tenants SET vertical='education', name='Test Education' WHERE id='e3b121f1-7c75-4e2e-9d72-e3b0c1f1a1a1';

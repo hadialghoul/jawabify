@@ -1,0 +1,1 @@
+UPDATE public.order_sessions SET state='cancelled' WHERE state NOT IN ('done','cancelled') AND expires_at < now();

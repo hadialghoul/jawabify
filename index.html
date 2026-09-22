@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#FAFAF7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0B1411" media="(prefers-color-scheme: dark)" />
+<style>
+  html, body { background-color: #FAFAF7; }
+  @media (prefers-color-scheme: dark) {
+    html, body { background-color: #0B1411; }
+  }
+  #root { min-height: 100dvh; }
+  .jawabify-shell-hide #jawabify-lcp-shell { display: none !important; }
+</style>
+<style>
+  #jawabify-lcp-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #FAFAF7;
+    color: #0a0a1a;
+    font-family: 'Epilogue', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transition: opacity 0.55s ease;
+  }
+  #jawabify-lcp-shell.jawabify-shell-fading {
+    opacity: 0;
+    pointer-events: none;
+  }
+  #jawabify-lcp-shell h1,
+  #jawabify-lcp-shell h2 {
+    font-family: 'Urbanist', system-ui, -apple-system, sans-serif;
+    margin: 0;
+  }
+  .jawabify-shell-content {
+    position: relative;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .jawabify-shell-header {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .jawabify-shell-header img {
+    height: 36px;
+    width: auto;
+    border-radius: 6px;
+  }
+  .jawabify-shell-hero {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: center;
+    gap: 32px;
+    padding: 32px 0 64px;
+  }
+  @media (min-width: 1024px) {
+    .jawabify-shell-hero {
+      grid-template-columns: 1.05fr 1fr;
+      gap: 48px;
+    }
+  }
+  .jawabify-shell-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(10, 10, 26, 0.12);
+    background: rgba(255, 255, 255, 0.72);
+    padding: 7px 14px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #3a3a4a;
+    margin-bottom: 24px;
+    width: fit-content;
+  }
+  .jawabify-shell-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+  }
+  .jawabify-shell-hero h1 {
+    font-size: 36px;
+    line-height: 1.04;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    max-width: 12ch;
+  }
+  @media (min-width: 640px) {
+    .jawabify-shell-hero h1 { font-size: 52px; }
+  }
+  @media (min-width: 1024px) {
+    .jawabify-shell-hero h1 { font-size: 64px; }
+  }
+  .jawabify-shell-gradient {
+    background: linear-gradient(135deg, #4f46e5 0%, #0a0a1a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .jawabify-shell-hero p {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #3a3a4a;
+    margin-top: 20px;
+    max-width: 560px;
+  }
+  @media (min-width: 640px) {
+    .jawabify-shell-hero p { font-size: 18px; }
+  }
+  .jawabify-shell-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 28px;
+  }
+  .jawabify-shell-ctas a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 9999px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.15s ease;
+  }
+  .jawabify-shell-ctas a:hover { transform: translateY(-1px); }
+  .jawabify-shell-ctas a:first-child {
+    background: #0a0a1a;
+    color: #fff;
+  }
+  .jawabify-shell-ctas a:last-child {
+    background: #fff;
+    color: #0a0a1a;
+    border: 1px solid rgba(10, 10, 26, 0.12);
+  }
+  .jawabify-shell-right {
+    display: none;
+  }
+  @media (min-width: 1024px) {
+    .jawabify-shell-right { display: block; }
+  }
+  .jawabify-shell-visual {
+    width: 100%;
+    height: 420px;
+    background: #fff;
+    border: 1px solid rgba(10, 10, 26, 0.08);
+    border-radius: 24px;
+    box-shadow: 0 24px 60px -20px rgba(79, 70, 229, 0.28);
+    position: relative;
+    overflow: hidden;
+  }
+  .jawabify-shell-visual::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 70% 30%, rgba(79, 70, 229, 0.12) 0%, transparent 60%);
+  }
+  .jawabify-shell-visual::after {
+    content: '';
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    right: 24px;
+    height: 48px;
+    background: rgba(10, 10, 26, 0.04);
+    border-radius: 12px;
+  }
+</style>
+<title>Jawabify — AI WhatsApp Customer Messaging for Businesses</title>
+    <meta name="description" content="Jawabify automates WhatsApp customer support, orders, and campaigns with an AI assistant for restaurants, real estate, healthcare and e‑commerce." />
+    <meta name="author" content="Jawabify" />
+    <meta name="google-site-verification" content="GL_udAhIH559nakQVPNbKzH_Ig297S5Y_5l4pGwa1Ec" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jawabify" />
+    <meta property="og:title" content="Jawabify — AI WhatsApp Customer Messaging" />
+    <meta property="og:description" content="Automate WhatsApp replies, orders and campaigns with a multilingual AI assistant built for businesses." />
+    <meta property="og:url" content="https://jawabify.com/" />
+    <meta property="og:image" content="https://jawabify.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@JawabifyApp" />
+    <meta name="twitter:title" content="Jawabify — AI WhatsApp Customer Messaging" />
+    <meta name="twitter:description" content="Automate WhatsApp replies, orders and campaigns with a multilingual AI assistant built for businesses." />
+    <meta name="twitter:image" content="https://jawabify.com/og-image.png" />
+
+    <link rel="preload" as="image" href="/apple-touch-icon.png?v=7" fetchpriority="high" />
+    <link rel="shortcut icon" href="/favicon.ico?v=7" sizes="any">
+    <link rel="icon" href="/favicon.ico?v=7" sizes="16x16 24x24 32x32 48x48 64x64 128x128 256x256">
+    <link rel="icon" href="/favicon.png?v=7" type="image/png" sizes="512x512">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=7" sizes="180x180">
+    <link rel="manifest" href="/site.webmanifest?v=7">
+    <meta name="msapplication-TileImage" content="/icon-192.png?v=7" />
+    <meta name="msapplication-TileColor" content="#0B1411" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@500;600;700;800;900&family=Epilogue:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@500;600;700;800;900&family=Epilogue:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@500;600;700;800;900&family=Epilogue:wght@400;500;600;700&display=swap"></noscript>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Jawabify",
+        "url": "https://jawabify.com",
+        "logo": "https://jawabify.com/favicon.png?v=7",
+        "description": "AI-powered WhatsApp messaging platform for customer support, orders and campaigns.",
+        "sameAs": ["https://twitter.com/JawabifyApp"]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Jawabify",
+        "url": "https://jawabify.com"
+      }
+    </script>
+
+    <!-- Meta Pixel Code -->
+    <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '1380055107297302');
+    fbq('track', 'PageView');
+    </script>
+    <!-- End Meta Pixel Code -->
+  </head>
+
+  <body>
+    <noscript><img height="1" width="1" style="display:none"
+    src="https://www.facebook.com/tr?id=1380055107297302&ev=PageView&noscript=1"
+    /></noscript>
+    <script>
+      (function() {
+        if (location.pathname !== '/' && location.pathname !== '/index.html') {
+          document.documentElement.classList.add('jawabify-shell-hide');
+        }
+      })();
+    </script>
+    <div id="jawabify-lcp-shell">
+      <div class="jawabify-shell-content">
+        <header class="jawabify-shell-header">
+          <a href="/" aria-label="Jawabify home">
+            <img src="/apple-touch-icon.png?v=7" alt="Jawabify brand emblem" width="36" height="36" loading="eager" fetchpriority="high">
+          </a>
+        </header>
+        <main class="jawabify-shell-hero">
+          <div class="jawabify-shell-left">
+            <div class="jawabify-shell-badge">
+              <span class="jawabify-shell-pulse" aria-hidden="true"></span>
+              <span>Now with Arabic, Arabizi & 20+ languages</span>
+            </div>
+            <h1>The AI that runs your entire <span class="jawabify-shell-gradient">WhatsApp business</span></h1>
+            <p>Jawabify replies to every customer, takes orders, books appointments, and runs campaigns — 24/7, in every language, from one AI-powered inbox.</p>
+            <div class="jawabify-shell-ctas">
+              <a href="/auth">Start 7-day free trial</a>
+              <a href="/how-it-works">See how it works</a>
+            </div>
+          </div>
+          <div class="jawabify-shell-right" aria-hidden="true">
+            <div class="jawabify-shell-visual"></div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      window.addEventListener('load', function() {
+        var shell = document.getElementById('jawabify-lcp-shell');
+        if (!shell) return;
+        shell.classList.add('jawabify-shell-fading');
+        setTimeout(function() { shell.remove(); }, 650);
+      });
+    </script>
+  </body>
+</html>

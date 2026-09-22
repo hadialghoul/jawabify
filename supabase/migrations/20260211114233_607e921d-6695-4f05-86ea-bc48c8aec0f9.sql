@@ -1,0 +1,1 @@
+ALTER TABLE public.tenant_credentials ADD COLUMN waba_id text;

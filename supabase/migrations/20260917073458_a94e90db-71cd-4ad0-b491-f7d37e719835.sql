@@ -1,0 +1,1 @@
+ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS blocked boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS blocked_at timestamptz;
