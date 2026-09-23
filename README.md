@@ -16,12 +16,52 @@ Then:
 - Press `i` for iOS simulator / Expo Go
 - Scan the QR code in Expo Go on a physical phone
 
-## Native store builds
+## Native store builds (production)
+
+Expo account: `hadialghoul` · Project: [jawabify](https://expo.dev/accounts/hadialghoul/projects/jawabify)
+
+### 1. Android APK (sideload / test)
 
 ```sh
-npx eas-cli login
-npx eas-cli build --platform android
-npx eas-cli build --platform ios
+cd mobile
+eas build --platform android --profile production-apk
+```
+
+First run will ask to generate a keystore — choose **Yes**. When the build finishes, download the `.apk` from the Expo dashboard link and install it on a phone.
+
+### 2. iOS TestFlight
+
+Requires a paid [Apple Developer](https://developer.apple.com) account ($99/year).
+
+```sh
+cd mobile
+eas build --platform ios --profile production --auto-submit
+```
+
+You will be prompted for your Apple ID / app-specific password. After processing in App Store Connect (often 5–30 min), open **TestFlight** on an iPhone to install.
+
+Or build and submit separately:
+
+```sh
+eas build --platform ios --profile production
+eas submit --platform ios --latest
+```
+
+### Profiles
+
+| Profile | Use |
+|---|---|
+| `production-apk` | Release Android APK for device testing |
+| `production` | Store builds (iOS → TestFlight/App Store, Android → Play `.aab`) |
+| `preview` | Internal APK / internal iOS |
+| `development` | Dev client |
+
+### npm shortcuts
+
+```sh
+npm run build:apk
+npm run build:ios
+npm run build:ios:submit
 ```
 
 ## What is included
