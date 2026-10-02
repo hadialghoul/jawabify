@@ -71,6 +71,7 @@ export function useOrders() {
     productName: string;
     quantity: number;
     deliveryFee?: number;
+    totalPrice?: number;
   }) => {
     try {
       const insertPayload: any = {
@@ -86,6 +87,10 @@ export function useOrders() {
       };
       if (typeof orderData.deliveryFee === 'number') {
         insertPayload.delivery_fee = orderData.deliveryFee;
+      }
+      // Keep the price staff entered on the order so receipts and totals match.
+      if (typeof orderData.totalPrice === 'number' && !isNaN(orderData.totalPrice)) {
+        insertPayload.total_price = orderData.totalPrice;
       }
       // Queue the order for Shopify registration. 'pending' makes the retry
       // worker pick it up if the immediate push below fails or never runs.
@@ -125,6 +130,7 @@ export function useOrders() {
         productName: data.product_name,
         quantity: data.quantity,
         deliveryFee: (data as any).delivery_fee == null ? 3 : (parseFloat((data as any).delivery_fee) || 0),
+        totalPrice: (data as any).total_price == null ? null : (parseFloat((data as any).total_price) || 0),
         status: data.status as Order['status'],
         createdAt: new Date(data.created_at),
         updatedAt: new Date(data.updated_at),

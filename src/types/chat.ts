@@ -40,6 +40,7 @@ export interface Contact {
   assignedAt?: Date;
   blocked?: boolean;
   blockedAt?: Date;
+  leadStatus?: string;
 }
 
 export interface ContactCrmUpdate {

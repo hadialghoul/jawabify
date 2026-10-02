@@ -74,15 +74,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { action, params } = await req.json();
+
     const creds = await getShopifyCredentials(supabaseAdmin, tenantId);
     if (!creds) {
-      return new Response(JSON.stringify({ error: "Shopify not connected" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Background pushes (e.g. a new order) run for every tenant, including the
+      // many that never connected Shopify. Answer them with a plain "not
+      // connected" result instead of an error so nothing surfaces as a failure.
+      const background = action === "register_order" || action === "register_webhooks";
+      return new Response(
+        JSON.stringify({ connected: false, synced: false, kind: "not_connected", ...(background ? {} : { error: "Shopify not connected" }) }),
+        { status: background ? 200 : 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
-
-    const { action, params } = await req.json();
 
     let result;
     switch (action) {

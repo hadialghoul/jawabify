@@ -382,6 +382,94 @@ ${text.slice(0, 24000)}`;
   }
 }
 
+/**
+ * Service businesses: pull the SERVICES a site offers (name, what it includes,
+ * duration, price when shown) — never physical products. When the site lists no
+ * services at all, fall back to an "about the business" paragraph.
+ */
+async function extractServicesFromText(
+  text: string,
+  apiKey: string,
+  sourceUrl?: string,
+): Promise<Product[]> {
+  const prompt = `Extract every distinct SERVICE this business offers from the text below.
+A service is something delivered to a client (consultation, session, class, package of work, treatment, training, trip, plan, retainer...). NEVER extract physical goods, shipping, blog posts or navigation.
+Return ONLY a JSON array, no prose or code fences. Each item:
+{"title": string, "price": string|null, "duration": string|null, "description": string|null}
+Rules:
+- price = exactly as shown with its currency symbol, or null if not stated.
+- duration = how long it takes (e.g. "60 min", "3 sessions") if stated, else null.
+- description = short summary of what the service includes.
+- Never invent services, prices or durations.
+- If no services are described, return [].
+
+TEXT:
+${text.slice(0, 24000)}`;
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "google/gemini-3.8-flash",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!r.ok) return [];
+    const j = await r.json();
+    let content: string = j?.choices?.[0]?.message?.content || "[]";
+    content = content.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const start = content.indexOf("[");
+    const end = content.lastIndexOf("]");
+    if (start === -1 || end === -1) return [];
+    const arr = JSON.parse(content.slice(start, end + 1));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((x: any) => x && typeof x.title === "string" && x.title.trim())
+      .map((x: any) => ({
+        title: String(x.title).slice(0, 200),
+        price: x.price != null ? String(x.price) : undefined,
+        description: x.description ? String(x.description).slice(0, 1500) : undefined,
+        variants: x.duration ? `Duration: ${String(x.duration).slice(0, 100)}` : undefined,
+        product_type: "Service",
+        url: sourceUrl,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function extractAboutParagraph(text: string, apiKey: string): Promise<string | null> {
+  const prompt = `Write a factual "about this business" paragraph (max 120 words) using ONLY the text below: what the business does, who it serves, where it is based, and how clients can get in touch or book. Never invent anything. Reply with the paragraph only.
+
+TEXT:
+${text.slice(0, 16000)}`;
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "google/gemini-3.8-flash",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const out = String(j?.choices?.[0]?.message?.content || "").trim();
+    return out.length > 40 ? out.slice(0, 2000) : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatServiceContent(p: Product): string {
+  const lines = [`Service: ${p.title}`];
+  if (p.price) lines.push(`Price: ${p.price}`);
+  if (p.variants) lines.push(p.variants);
+  if (p.description) lines.push(`Details: ${p.description}`);
+  if (p.url) lines.push(`Link: ${p.url}`);
+  return lines.join("\n");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -443,7 +531,7 @@ Deno.serve(async (req) => {
 
 
 
-    const insertProducts = async (list: Product[]) => {
+    const insertProducts = async (list: Product[], fmt: (p: Product) => string = formatContent) => {
       let inserted = 0;
       const failed: Array<{ item: string; reason: string }> = [];
       const BATCH = 64;
@@ -467,7 +555,7 @@ Deno.serve(async (req) => {
         );
         const fresh = batch.filter((p) => !existingTitles.has(p.title.trim().toLowerCase()));
         if (!fresh.length) continue;
-        const contents = fresh.map((p) => formatContent(p));
+        const contents = fresh.map((p) => fmt(p));
         const embeddings = await embedBatch(
           fresh.map((p, k) => `${p.title}\n${contents[k]}`),
           LOVABLE_API_KEY,
@@ -493,6 +581,94 @@ Deno.serve(async (req) => {
       }
       return { inserted, failed };
     };
+
+    // ---------------------------------------------------------------------
+    // SERVICE BUSINESSES: import the services the website offers (never
+    // products). No services on the site → save an "about" paragraph instead.
+    // ---------------------------------------------------------------------
+    if (body?.vertical === "service" || body?.mode === "services") {
+      const replacedSvc = await purgeAll();
+      const pages = [...new Set([
+        rawUrl,
+        `${origin}/services`,
+        `${origin}/our-services`,
+        `${origin}/what-we-do`,
+        `${origin}/packages`,
+        `${origin}/pricing`,
+        `${origin}/about`,
+      ])];
+
+      const seen = new Set<string>();
+      const services: Product[] = [];
+      const texts: string[] = [];
+      for (let i = 0; i < pages.length; i += 3) {
+        const batch = pages.slice(i, i + 3);
+        const results = await Promise.all(batch.map(async (u) => {
+          const text = await fetchReadableText(u);
+          if (!text) return null;
+          texts.push(text);
+          return await extractServicesFromText(text, LOVABLE_API_KEY, u);
+        }));
+        for (const list of results) {
+          for (const s of list || []) {
+            const key = s.title.toLowerCase().trim();
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            services.push(s);
+          }
+        }
+      }
+
+      if (services.length) {
+        const res = await insertProducts(services, formatServiceContent);
+        return json({
+          done: true,
+          mode: "services",
+          inserted: res.inserted,
+          total_inserted: res.inserted,
+          replaced: replacedSvc,
+          failed: res.failed.slice(0, 20),
+          failed_count: res.failed.length,
+          with_price: services.filter((s) => s.price).length,
+          source: "services",
+          site: origin,
+        });
+      }
+
+      const combined = texts.join("\n\n").trim();
+      const about = combined ? await extractAboutParagraph(combined, LOVABLE_API_KEY) : null;
+      if (!about) {
+        return json({
+          error: "Couldn't read any services or an about section from that website. Try a direct services page URL, or upload your service list as a file.",
+          site: origin,
+        }, 400);
+      }
+      const title = `About ${new URL(origin).hostname}`;
+      const [emb] = await embedBatch([`${title}\n${about}`], LOVABLE_API_KEY);
+      const { error: aboutErr } = await admin.from("ai_knowledge").insert({
+        tenant_id: tenantId,
+        title,
+        content: about,
+        type: "website_product",
+        is_active: true,
+        embedding: emb as any,
+      });
+      if (aboutErr) return json({ error: aboutErr.message }, 500);
+      return json({
+        done: true,
+        mode: "about",
+        inserted: 1,
+        total_inserted: 1,
+        replaced: replacedSvc,
+        failed: [],
+        failed_count: 0,
+        with_price: 0,
+        source: "about",
+        site: origin,
+      });
+    }
+
+
 
 
     // ---------------------------------------------------------------------

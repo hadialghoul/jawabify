@@ -6,6 +6,7 @@
 // AI hint extraction intentionally removed — ordering is programmatic only.
 
 import { sendMetaEvent } from "./meta-conversions.ts";
+import { askPaymentMethod } from "./online-payment.ts";
 
 export interface OrderFlowDeps {
   supabase: any;
@@ -1917,6 +1918,10 @@ async function advanceFlow(deps: OrderFlowDeps, session: OrderSession, incoming:
               deps,
               T.orderPlaced(String(result.displayId ?? ""), session.draft.total, DELIVERY_FEE, lang),
             );
+            await askPaymentMethod(
+              { supabase: deps.supabase, tenantId: deps.tenantId, contactId: deps.contactId, phoneNumber: deps.phoneNumber, phoneNumberId: deps.phoneNumberId, accessToken: deps.accessToken },
+              { total: session.draft.total, currency: "USD", ref: result.displayId ?? null, lang: lang === "ar" ? "ar" : "en" },
+            ).catch((e) => console.error("askPaymentMethod failed", e));
           } else {
             await sendText(deps, T.orderFailed(result.error || (lang === "ar" ? "جرب مرة تانية" : "please try again"), lang));
           }

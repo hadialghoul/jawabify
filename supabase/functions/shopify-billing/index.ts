@@ -10,6 +10,7 @@ import {
   isValidShopDomain,
   normalizeShopDomain,
   shopifyGraphQL,
+  v2AppCreds,
 } from "../_shared/shopify.ts";
 
 const corsHeaders = {
@@ -189,9 +190,13 @@ Deno.serve(async (req) => {
       const sub = await activeSubscription(shop, creds.token);
       if (sub) await recordSubscription(shop, sub);
 
-      const dest = `${APP_URL}/shopify/connect?shop=${encodeURIComponent(shop)}&billing=${
-        sub ? "approved" : "declined"
-      }`;
+      // Embedded (new App Store app): return inside the Shopify Admin.
+      const v2 = v2AppCreds();
+      const dest = url.searchParams.get("embedded") === "1" && v2
+        ? `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/apps/${v2.client_id}`
+        : `${APP_URL}/shopify/connect?shop=${encodeURIComponent(shop)}&billing=${
+          sub ? "approved" : "declined"
+        }`;
       return new Response(null, { status: 302, headers: { Location: dest } });
     }
 
@@ -242,10 +247,23 @@ Deno.serve(async (req) => {
         return json({ already_active: true, plan: planKeyFromName(existing.name) });
       }
 
+      // The App Store app uses Shopify App Pricing (Managed Pricing): plans live
+      // in the Partner Dashboard and merchants pick one on Shopify's own page.
+      // The Billing API mutation is refused for these apps.
+      if ((body as any)?.embedded) {
+        const appHandle = Deno.env.get("SHOPIFY_V2_APP_HANDLE") || "jawabify-ai";
+        const storeHandle = shop.replace(".myshopify.com", "");
+        return json({
+          confirmation_url: `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`,
+          managed: true,
+        });
+      }
+
       const plan = PLANS[planKey];
       const test = await isDevStore(shop, creds.token);
       const returnUrl =
-        `${SUPABASE_URL}/functions/v1/shopify-billing/callback?shop=${encodeURIComponent(shop)}`;
+        `${SUPABASE_URL}/functions/v1/shopify-billing/callback?shop=${encodeURIComponent(shop)}` +
+        ((body as any)?.embedded ? "&embedded=1" : "");
 
       const mutation = `
         mutation AppSubscriptionCreate(

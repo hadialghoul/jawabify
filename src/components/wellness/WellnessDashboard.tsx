@@ -128,7 +128,7 @@ function CatalogPanel({ initial = "services" }: { initial?: "services" | "packag
 }
 
 // ============== SERVICES ==============
-function ServicesPanel() {
+export function ServicesPanel({ hint }: { hint?: string } = {}) {
   const { items, create, update, remove, loading } = useWellnessServices();
   const [editing, setEditing] = useState<Partial<WellnessService> | null>(null);
   return (
@@ -137,7 +137,7 @@ function ServicesPanel() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-semibold text-lg">Services</h3>
-            <p className="text-sm text-muted-foreground">Massages, classes, treatments — what the AI offers and books.</p>
+            <p className="text-sm text-muted-foreground">{hint ?? "Massages, classes, treatments — what the AI offers and books."}</p>
           </div>
           <Button onClick={() => setEditing({ duration_min: 60, currency: "USD", active: true })}><Plus className="h-4 w-4 mr-1.5" /> New Service</Button>
         </div>
@@ -188,7 +188,7 @@ function ServiceDialog({ service, onClose, onSave, onDelete }: {
           <div><Label>Category</Label><Input value={f.category || ""} onChange={(e) => u("category", e.target.value)} placeholder="Massage, Yoga, Facial..." /></div>
           <div className="grid grid-cols-3 gap-2">
             <div><Label>Duration (min)</Label><Input type="number" value={f.duration_min ?? 60} onChange={(e) => u("duration_min", parseInt(e.target.value) || 60)} /></div>
-            <div><Label>Price</Label><Input type="number" value={f.price ?? ""} onChange={(e) => u("price", e.target.value ? parseFloat(e.target.value) : null)} /></div>
+            <div><Label>Price <span className="text-muted-foreground font-normal">(optional)</span></Label><Input type="number" value={f.price ?? ""} onChange={(e) => u("price", e.target.value !== "" ? parseFloat(e.target.value) : null)} placeholder="—" /></div>
             <div><Label>Currency</Label><Input value={f.currency || "USD"} onChange={(e) => u("currency", e.target.value)} /></div>
           </div>
           <div><Label>Image URL</Label><Input value={f.image_url || ""} onChange={(e) => u("image_url", e.target.value || null)} /></div>
@@ -215,7 +215,7 @@ const STATUS_COLORS: Record<WellnessSession["status"], string> = {
   no_show: "bg-orange-200 border-l-orange-500 text-orange-900",
 };
 
-function SessionsPanel() {
+export function SessionsPanel() {
   const [view, setView] = useState<"day" | "week">("week");
   const [cursor, setCursor] = useState(new Date());
   const range = useMemo(() => view === "day"
@@ -309,7 +309,9 @@ function SessionsPanel() {
 }
 
 // ============== LEADS ==============
-const STATUS_META: Record<WellnessLead["status"], { label: string; hint: string; tint: string; dot: string }> = {
+type LeadStatusMeta = Record<WellnessLead["status"], { label: string; hint: string; tint: string; dot: string }>;
+
+const STATUS_META: LeadStatusMeta = {
   new:       { label: "New enquiry",  hint: "Just reached out",          tint: "bg-sky-50 border-sky-200",       dot: "bg-sky-400" },
   qualified: { label: "Interested",   hint: "Service & needs known",     tint: "bg-amber-50 border-amber-200",   dot: "bg-amber-400" },
   booked:    { label: "Session booked",hint: "Awaiting visit",           tint: "bg-violet-50 border-violet-200", dot: "bg-violet-500" },
@@ -317,22 +319,30 @@ const STATUS_META: Record<WellnessLead["status"], { label: string; hint: string;
   no_show:   { label: "No-show / lost",hint: "Did not attend",           tint: "bg-rose-50 border-rose-200",     dot: "bg-rose-400" },
 };
 
-function LeadsPanel({ contacts, onSelectContact }: { contacts: Contact[]; onSelectContact: (c: Contact) => void }) {
+export function LeadsPanel({ contacts, onSelectContact, title, hint, statusMeta, showStaff = true }: {
+  contacts: Contact[];
+  onSelectContact: (c: Contact) => void;
+  title?: string;
+  hint?: string;
+  statusMeta?: LeadStatusMeta;
+  showStaff?: boolean;
+}) {
   const { items: leads, update, remove } = useWellnessLeads();
   const { items: staff } = useWellnessStaff();
   const { items: services } = useWellnessServices();
+  const META = statusMeta ?? STATUS_META;
   const columns: WellnessLead["status"][] = ["new", "qualified", "booked", "completed", "no_show"];
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-4">
-        <h3 className="font-semibold text-lg">Leads</h3>
-        <p className="text-sm text-muted-foreground">Pipeline of guests the AI is talking to — drag through stages from first enquiry to completed session.</p>
+        <h3 className="font-semibold text-lg">{title ?? "Leads"}</h3>
+        <p className="text-sm text-muted-foreground">{hint ?? "Pipeline of guests the AI is talking to — drag through stages from first enquiry to completed session."}</p>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
 
         {columns.map((col) => {
           const items = leads.filter((l) => l.status === col);
-          const meta = STATUS_META[col];
+          const meta = META[col];
           return (
             <div key={col} className={`rounded-md p-2 min-h-[200px] border ${meta.tint}`}>
               <div className="flex items-center gap-1.5 mb-1">
@@ -360,11 +370,11 @@ function LeadsPanel({ contacts, onSelectContact }: { contacts: Contact[]; onSele
                         ) : (
                           <p className="text-[11px] text-muted-foreground italic">No service yet</p>
                         )}
-                        {member && <p className="text-[11px] text-purple-700">🧖 {member.name}</p>}
+                        {showStaff && member && <p className="text-[11px] text-purple-700">🧖 {member.name}</p>}
                         <div className="flex items-center gap-1 pt-1">
                           <Select value={l.status} onValueChange={(v) => update(l.id, { status: v as any })}>
                             <SelectTrigger className="h-6 text-[11px]" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                            <SelectContent>{columns.map((s) => <SelectItem key={s} value={s} className="text-xs">{STATUS_META[s].label}</SelectItem>)}</SelectContent>
+                            <SelectContent>{columns.map((s) => <SelectItem key={s} value={s} className="text-xs">{META[s].label}</SelectItem>)}</SelectContent>
                           </Select>
                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); if (confirm("Delete?")) remove(l.id); }}><Trash2 className="h-3 w-3" /></Button>
                         </div>
@@ -529,7 +539,7 @@ function StaffPanel() {
 }
 
 // ============== FLAGGED ==============
-function FlaggedPanel({ flagged, onSelectContact, onResolve }: { flagged: Contact[]; onSelectContact: (c: Contact) => void; onResolve: (id: string) => void }) {
+export function FlaggedPanel({ flagged, onSelectContact, onResolve }: { flagged: Contact[]; onSelectContact: (c: Contact) => void; onResolve: (id: string) => void }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="w-full">

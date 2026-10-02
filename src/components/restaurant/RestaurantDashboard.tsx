@@ -18,7 +18,7 @@ import type { Contact } from "@/types/chat";
 import type { Order } from "@/types/order";
 import { useOrders } from "@/hooks/useOrders";
 import { RestaurantNewOrderDialog } from "@/components/restaurant/RestaurantNewOrderDialog";
-import { InterestedPanel, AiIssuesPanel } from "@/components/dashboard/SharedPanels";
+import { InterestedPanel, AiIssuesPanel, NoOrderPanel } from "@/components/dashboard/SharedPanels";
 
 const OverviewDashboard = lazy(() => import("@/components/analytics/OverviewDashboard").then((m) => ({ default: m.OverviewDashboard })));
 const CrmTab = lazy(() => import("@/components/crm/CrmTab").then((m) => ({ default: m.CrmTab })));
@@ -41,6 +41,7 @@ export type RestaurantTab =
   | "flagged"
   | "campaigns"
   | "interested"
+  | "no_order"
   | "ai_issues";
 
 
@@ -107,6 +108,7 @@ export function RestaurantDashboard({
               </TabsTrigger>
               <TabsTrigger value="crm" data-tour="rest-crm" className="flex items-center gap-1.5 whitespace-nowrap">
               <TabsTrigger value="interested" data-tour="rest-interested" className="flex items-center gap-1.5 whitespace-nowrap">Interested</TabsTrigger>
+              <TabsTrigger value="no_order" className="flex items-center gap-1.5 whitespace-nowrap">No order yet</TabsTrigger>
                 <Users className="h-4 w-4" /> CRM
               </TabsTrigger>
               <TabsTrigger value="flagged" data-tour="rest-flagged" className="flex items-center gap-1.5 whitespace-nowrap">
@@ -220,6 +222,15 @@ export function RestaurantDashboard({
               selectedContactId={selectedContactId ?? null}
               onSelectContact={onSelectContact}
               onToggleInterested={onToggleInterested}
+            />
+          )}
+
+          {tab === "no_order" && (
+            <NoOrderPanel
+              contacts={contacts}
+              orders={orders}
+              selectedContactId={selectedContactId ?? null}
+              onSelectContact={onSelectContact}
             />
           )}
 

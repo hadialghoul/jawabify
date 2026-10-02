@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isEmbeddedShopify } from '@/lib/shopifyEmbedded';
 import { ArrowLeft, Save, Link, Loader2, Bot, MessageSquare, Sparkles, ImagePlus, Trash2, Image, LogOut, UserRound, Store, ShoppingBag, CheckCircle2, Facebook, CreditCard, Mail, Phone, Instagram, FileUp, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input as SettingsInput } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -19,6 +21,9 @@ import { useBillingOrigin } from '@/hooks/useBillingOrigin';
 import { RestaurantSettings } from '@/components/restaurant/RestaurantSettings';
 import { RealEstateSettings } from '@/components/real_estate/RealEstateSettings';
 import { WellnessSettings } from '@/components/wellness/WellnessSettings';
+import { ServiceSettings } from '@/components/service/ServiceSettings';
+import { OnlinePaymentsCard } from '@/components/settings/OnlinePaymentsCard';
+import { QuickAnswersCard } from '@/components/settings/QuickAnswersCard';
 import { HealthcareSettings } from '@/components/healthcare/HealthcareSettings';
 import { EducationSettings } from '@/components/education/EducationSettings';
 import { useTenantVertical } from '@/hooks/useTenantVertical';
@@ -27,7 +32,7 @@ import { WhatsAppHealthCard } from '@/components/settings/WhatsAppHealthCard';
 import { FileImportCard } from '@/components/settings/FileImportCard';
 import { actingHeaders } from '@/lib/actingTenant';
 import { useInstagramConnection } from '@/hooks/useChannels';
-import { useInstagramConnect } from '@/hooks/useInstagramConnect';
+import { InstagramConnectButton } from '@/components/InstagramConnectButton';
 import { TeamManager } from '@/components/settings/TeamManager';
 import { TeamActivity } from '@/components/settings/TeamActivity';
 
@@ -86,6 +91,14 @@ export default function Settings() {
   const [aiRepliesEnabled, setAiRepliesEnabled] = useState(true);
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>('all');
   const [aiUpsellEnabled, setAiUpsellEnabled] = useState(false);
+  const { vertical: tenantVertical } = useTenantVertical();
+  // Product options (sizes / colors) — e-commerce
+  const [variantsEnabled, setVariantsEnabled] = useState(false);
+  const [variantSizes, setVariantSizes] = useState('');
+  const [variantColors, setVariantColors] = useState('');
+  const [savingVariantOptions, setSavingVariantOptions] = useState(false);
+  const [newImageSizes, setNewImageSizes] = useState('');
+  const [newImageColors, setNewImageColors] = useState('');
   
   // Learn from conversations state
   const [learnEnabled, setLearnEnabled] = useState(false);
@@ -124,12 +137,16 @@ export default function Settings() {
   const [clearingWebsiteProducts, setClearingWebsiteProducts] = useState(false);
   // Unified import source picker (website / shopify / file)
   const [importSource, setImportSource] = useState<'website' | 'shopify' | 'file'>('website');
+  // Service businesses have no product catalog to import — file upload only.
+  const isServiceVertical = tenantVertical === 'service';
+  useEffect(() => {
+    if (isServiceVertical) setImportSource('file');
+  }, [isServiceVertical]);
   const [whatsAppConnected, setWhatsAppConnected] = useState(false);
   const [whatsAppPhone, setWhatsAppPhone] = useState('');
   const [whatsAppConnecting, setWhatsAppConnecting] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
   const instagram = useInstagramConnection();
-  const { connecting: igConnecting, startConnect: startInstagramConnect } = useInstagramConnect(() => instagram.refresh());
   const [activeSettingsTab, setActiveSettingsTab] = useState('knowledge');
 
   // Settings tour state
@@ -502,14 +519,25 @@ export default function Settings() {
 
   const fetchImportedProducts = async () => {
     if (!tenantId) return;
-    const { data } = await supabase
-      .from('ai_knowledge')
-      .select('id, title, shopify_product_id, updated_at')
-      .eq('tenant_id', tenantId)
-      .eq('type', 'shopify_product')
-      .order('title', { ascending: true });
-    setImportedProducts((data as any) || []);
+    // The backend caps a single response at 1000 rows, so page through
+    // everything — large catalogs can hold 10k+ products.
+    const rows: any[] = [];
+    const PAGE = 1000;
+    for (let from = 0; from < 60000; from += PAGE) {
+      const { data, error } = await supabase
+        .from('ai_knowledge')
+        .select('id, title, shopify_product_id, updated_at')
+        .eq('tenant_id', tenantId)
+        .eq('type', 'shopify_product')
+        .order('title', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) break;
+      rows.push(...((data as any[]) || []));
+      if (!data || data.length < PAGE) break;
+    }
+    setImportedProducts(rows as any);
   };
+
 
   const fetchWebsiteProducts = async () => {
     if (!tenantId) return;
@@ -582,16 +610,23 @@ export default function Settings() {
 
   const fetchKnowledgeImages = async () => {
     if (!tenantId) return;
-    const { data, error } = await supabase
-      .from('knowledge_images')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setKnowledgeImages(data as any as KnowledgeImage[]);
+    // Paged: a single response is capped at 1000 rows.
+    const rows: any[] = [];
+    const PAGE = 1000;
+    for (let from = 0; from < 60000; from += PAGE) {
+      const { data, error } = await supabase
+        .from('knowledge_images')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) break;
+      rows.push(...((data as any[]) || []));
+      if (!data || data.length < PAGE) break;
     }
+    setKnowledgeImages(rows as any as KnowledgeImage[]);
   };
+
 
 
   const handleAddFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -622,6 +657,13 @@ export default function Settings() {
       return;
     }
 
+    // When the business sells products with sizes / colors, store them with the
+    // description so the AI can quote the available options to customers.
+    const optionLines: string[] = [];
+    if (variantsEnabled && newImageSizes.trim()) optionLines.push(`Available sizes: ${newImageSizes.trim()}`);
+    if (variantsEnabled && newImageColors.trim()) optionLines.push(`Available colors: ${newImageColors.trim()}`);
+    const fullDesc = [newImageDesc.trim(), ...optionLines].join('\n');
+
     setUploadingImage(true);
     try {
       for (const file of pendingFiles) {
@@ -642,7 +684,7 @@ export default function Settings() {
           .from('knowledge_images')
           .insert({
             image_url: urlData.publicUrl,
-            description: newImageDesc.trim(),
+            description: fullDesc,
             label: newImageLabel.trim(),
             is_active: true,
             tenant_id: tenantId,
@@ -658,6 +700,8 @@ export default function Settings() {
       toast.success(`${pendingFiles.length} image(s) added for "${newImageLabel.trim()}"`);
       setNewImageLabel('');
       setNewImageDesc('');
+      setNewImageSizes('');
+      setNewImageColors('');
       setPendingFiles([]);
     } catch (error) {
       console.error('Error uploading images:', error);
@@ -714,6 +758,49 @@ export default function Settings() {
     if (upsellRow) {
       setAiUpsellEnabled(upsellRow.value === true || upsellRow.value === 'true');
     }
+
+    // Product options (sizes / colors)
+    const { data: variantRows } = await supabase
+      .from('app_settings')
+      .select('key, value')
+      .eq('tenant_id', tenantId)
+      .in('key', ['product_variants_enabled', 'product_variant_sizes', 'product_variant_colors']);
+    const pickVal = (k: string) => (variantRows || []).find((r: any) => r.key === k)?.value;
+    const asText = (v: any) => (typeof v === 'string' ? v.replace(/^"|"$/g, '') : v ? String(v) : '');
+    const ve = pickVal('product_variants_enabled');
+    setVariantsEnabled(ve === true || ve === 'true');
+    setVariantSizes(asText(pickVal('product_variant_sizes')));
+    setVariantColors(asText(pickVal('product_variant_colors')));
+  };
+
+  const toggleVariants = async (enabled: boolean) => {
+    if (!tenantId) { toast.error('No account selected'); return; }
+    setVariantsEnabled(enabled);
+    const { error } = await supabase.from('app_settings').upsert(
+      { tenant_id: tenantId, key: 'product_variants_enabled', value: enabled } as any,
+      { onConflict: 'tenant_id,key' },
+    );
+    if (error) {
+      toast.error('Failed to update setting');
+      setVariantsEnabled(!enabled);
+    } else {
+      toast.success(enabled ? 'Sizes & colors turned on' : 'Sizes & colors turned off');
+    }
+  };
+
+  const saveVariantOptions = async () => {
+    if (!tenantId) { toast.error('No account selected'); return; }
+    setSavingVariantOptions(true);
+    const { error } = await supabase.from('app_settings').upsert(
+      [
+        { tenant_id: tenantId, key: 'product_variant_sizes', value: variantSizes.trim() },
+        { tenant_id: tenantId, key: 'product_variant_colors', value: variantColors.trim() },
+      ] as any,
+      { onConflict: 'tenant_id,key' },
+    );
+    setSavingVariantOptions(false);
+    if (error) toast.error('Could not save the options');
+    else toast.success('Sizes & colors saved');
   };
 
   const toggleAiUpsell = async (enabled: boolean) => {
@@ -1090,25 +1177,31 @@ export default function Settings() {
       let total = 0;
       let withPrice = 0;
       let site = url;
+      let mode: string | undefined;
+      const noun = isServiceVertical ? 'service' : 'product';
       const progressId = 'website-import-progress';
       for (let step = 0; step < 200; step++) {
         const { data, error } = await supabase.functions.invoke('import-website-products', {
           headers: actingHeaders(),
-          body: { url, cursor },
+          body: { url, cursor, ...(isServiceVertical ? { vertical: 'service' } : {}) },
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
         total = data.total_inserted ?? data.inserted ?? total;
         withPrice += data.with_price || 0;
         site = data.site || site;
+        mode = data.mode || mode;
         if (data.done) break;
         cursor = data.cursor;
-        toast.loading(`Importing… ${total} products so far`, { id: progressId });
+        toast.loading(`Importing… ${total} ${noun}s so far`, { id: progressId });
       }
       toast.dismiss(progressId);
       toast.success(
-        `Imported ${total} product${total === 1 ? '' : 's'} (${withPrice} with prices) from ${site}`,
+        mode === 'about'
+          ? `No services listed on ${site} — saved an about paragraph instead`
+          : `Imported ${total} ${noun}${total === 1 ? '' : 's'} (${withPrice} with prices) from ${site}`,
       );
+
       setUrlInput('');
       setShowWebsiteList(true);
       fetchImportedProducts?.();
@@ -1264,7 +1357,14 @@ export default function Settings() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto max-w-3xl space-y-4">
-          <SubscriptionCard userId={user?.id} />
+          {isEmbeddedShopify() ? (
+            <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
+              Your Jawabify plan is billed on your Shopify invoice. Manage or cancel it in
+              Shopify Admin → Settings → Apps and sales channels.
+            </div>
+          ) : (
+            <SubscriptionCard userId={user?.id} />
+          )}
 
           {isTenantAdmin && (
             <>
@@ -1321,6 +1421,50 @@ export default function Settings() {
                 </div>
                 <Switch checked={aiUpsellEnabled} onCheckedChange={toggleAiUpsell} />
               </div>
+              {tenantVertical === 'ecommerce' && (
+                <div className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">My products have sizes &amp; colors</p>
+                      <p className="text-xs text-muted-foreground">
+                        When on, the AI tells customers which sizes and colors are available and always asks them to pick one
+                        before confirming an order. Options come from your store (Shopify sizes/colors are read automatically)
+                        and from what you add with each product photo.
+                      </p>
+                    </div>
+                    <Switch checked={variantsEnabled} onCheckedChange={toggleVariants} />
+                  </div>
+                  {variantsEnabled && (
+                    <div className="space-y-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Sizes you usually carry (optional)</Label>
+                        <Input
+                          value={variantSizes}
+                          onChange={(e) => setVariantSizes(e.target.value)}
+                          placeholder="S, M, L, XL, 40, 41, 42"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Colors you usually carry (optional)</Label>
+                        <Input
+                          value={variantColors}
+                          onChange={(e) => setVariantColors(e.target.value)}
+                          placeholder="Black, White, Beige, Navy"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        These are only used as a general guide. Per-product options always come first.
+                      </p>
+                      <div className="flex justify-end">
+                        <Button size="sm" onClick={saveVariantOptions} disabled={savingVariantOptions}>
+                          {savingVariantOptions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 You can also control AI replies <strong>per chat</strong> using the bot icon in each conversation header.
               </p>
@@ -1387,19 +1531,17 @@ export default function Settings() {
                         ? instagram.username
                           ? `@${instagram.username}`
                           : 'Instagram professional account linked'
-                        : 'Requires an Instagram professional account linked to your Facebook Page.'}
+                        : 'Sign in with Facebook and pick the Page linked to your Instagram professional account.'}
                     </p>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={instagram.connected ? 'outline' : 'default'}
-                  disabled={igConnecting}
-                  onClick={() => (instagram.connected ? navigate('/integrations') : startInstagramConnect())}
-                >
-                  {igConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {instagram.connected ? 'Manage' : 'Connect Instagram'}
-                </Button>
+                {instagram.connected ? (
+                  <Button size="sm" variant="outline" onClick={() => navigate('/integrations')}>
+                    Manage
+                  </Button>
+                ) : (
+                  <InstagramConnectButton size="sm" onConnected={() => instagram.refresh()} />
+                )}
               </div>
               {instagram.connected && isTenantAdmin && (
                 <div className="mt-3 flex justify-end">
@@ -1420,10 +1562,15 @@ export default function Settings() {
 
           {whatsAppConnected && <WhatsAppHealthCard />}
 
+          <OnlinePaymentsCard />
+
+          <QuickAnswersCard />
 
 
 
-          {/* Shopify Integration */}
+
+          {/* Shopify Integration — e-commerce accounts only */}
+          {tenantVertical === 'ecommerce' && (
           <Card data-tour="shopify-store">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -1527,6 +1674,7 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
+          )}
 
           <RestaurantSettingsBlock />
           <RealEstateSettingsBlock />
@@ -1553,10 +1701,11 @@ export default function Settings() {
 
             {/* Knowledge Base Tab */}
             <TabsContent value="knowledge" className="space-y-4" data-tour="knowledge-content">
-              <p className="text-sm text-muted-foreground">
-                Add all information the AI needs to respond to customers. This can include product details, 
-                pricing, FAQs, policies, and any other relevant information.
-              </p>
+               <p className="text-sm text-muted-foreground">
+                 {isServiceVertical
+                   ? 'Add everything the AI needs to answer clients: the services you offer, prices, how long each takes, availability, policies and FAQs.'
+                   : 'Add all information the AI needs to respond to customers. This can include product details, pricing, FAQs, policies, and any other relevant information.'}
+               </p>
 
               {/* Unified import: website / Shopify / file */}
               <Card className="border-dashed">
@@ -1566,16 +1715,24 @@ export default function Settings() {
                     Import
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Choose where your products and information come from.
+                    {isServiceVertical
+                      ? 'Import the services from your website, or upload your service list, price sheet or FAQ document.'
+                      : 'Choose where your products and information come from.'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    {([
-                      { key: 'website', label: 'Website', icon: Link },
-                      { key: 'shopify', label: 'Shopify', icon: ShoppingBag },
-                      { key: 'file', label: 'File', icon: FileUp },
-                    ] as const).map((opt) => {
+                  <div className={`grid gap-2 ${isServiceVertical ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {(isServiceVertical
+                      ? ([
+                          { key: 'website', label: 'Website', icon: Link },
+                          { key: 'file', label: 'File', icon: FileUp },
+                        ] as const)
+                      : ([
+                          { key: 'website', label: 'Website', icon: Link },
+                          { key: 'shopify', label: 'Shopify', icon: ShoppingBag },
+                          { key: 'file', label: 'File', icon: FileUp },
+                        ] as const)
+                    ).map((opt) => {
                       const Icon = opt.icon;
                       const active = importSource === opt.key;
                       return (
@@ -1593,14 +1750,15 @@ export default function Settings() {
                           {opt.label}
                         </button>
                       );
-                    })}
-                  </div>
+                     })}
+                   </div>
 
-                  {importSource === 'website' && (
+
+                   {importSource === 'website' && (
                     <div>
                       <div className="flex gap-2">
                         <Input
-                          placeholder="https://yourstore.com"
+                          placeholder={isServiceVertical ? 'https://yourbusiness.com' : 'https://yourstore.com'}
                           value={urlInput}
                           onChange={(e) => setUrlInput(e.target.value)}
                           className="flex-1 text-base"
@@ -1613,7 +1771,7 @@ export default function Settings() {
                           {extractingProducts ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
-                            'Extract products'
+                            isServiceVertical ? 'Extract services' : 'Extract products'
                           )}
                         </Button>
                         <Button
@@ -1629,10 +1787,21 @@ export default function Settings() {
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
-                        <strong>Extract products</strong> scans your website (product pages, sitemap, or Shopify catalog)
-                        and saves each product with its price as its own knowledge entry the AI can quote and sell from.
-                        Re-running replaces the previous website import. <strong>Fetch text</strong> just appends the page
-                        text to your general knowledge below.
+                        {isServiceVertical ? (
+                          <>
+                            <strong>Extract services</strong> reads your website and saves each service you offer — what it
+                            includes, how long it takes and its price when shown. If your site lists no services, we save a
+                            short paragraph about your business instead. Re-running replaces the previous website import.{' '}
+                            <strong>Fetch text</strong> just appends the page text to your general knowledge below.
+                          </>
+                        ) : (
+                          <>
+                            <strong>Extract products</strong> scans your website (product pages, sitemap, or Shopify catalog)
+                            and saves each product with its price as its own knowledge entry the AI can quote and sell from.
+                            Re-running replaces the previous website import. <strong>Fetch text</strong> just appends the page
+                            text to your general knowledge below.
+                          </>
+                        )}
                       </p>
 
                       {websiteProducts.length > 0 && (
@@ -1643,7 +1812,7 @@ export default function Settings() {
                               onClick={() => setShowWebsiteList((v) => !v)}
                               className="text-xs font-medium hover:underline text-left"
                             >
-                              {websiteProducts.length} product{websiteProducts.length === 1 ? '' : 's'} imported from your website
+                              {websiteProducts.length} {isServiceVertical ? 'entr' : 'product'}{isServiceVertical ? (websiteProducts.length === 1 ? 'y' : 'ies') : (websiteProducts.length === 1 ? '' : 's')} imported from your website
                               {' · '}
                               {websiteProducts.filter((p) => p.price).length} with prices
                               {' · '}
@@ -1930,9 +2099,9 @@ export default function Settings() {
               {/* Upload New Item Images */}
               <Card className="border-dashed">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <ImagePlus className="h-4 w-4" />
-                    Add Item Images
+                    {isServiceVertical ? 'Add Service Photos' : 'Add Item Images'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -1948,6 +2117,21 @@ export default function Settings() {
                     rows={2}
                     className="resize-none text-sm"
                   />
+                  {variantsEnabled && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input
+                        placeholder="Sizes available (e.g. S, M, L, XL)"
+                        value={newImageSizes}
+                        onChange={(e) => setNewImageSizes(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Colors available (e.g. Black, White, Red)"
+                        value={newImageColors}
+                        onChange={(e) => setNewImageColors(e.target.value)}
+                      />
+                    </div>
+                  )}
+
                   
                   {/* Pending files preview */}
                   {pendingFiles.length > 0 && (
@@ -2202,7 +2386,8 @@ function RealEstateSettingsBlock() {
 
 function WellnessSettingsBlock() {
   const { vertical } = useTenantVertical();
-  if (vertical !== 'wellness' && vertical !== 'service') return null;
+  if (vertical === 'service') return <ServiceSettings />;
+  if (vertical !== 'wellness') return null;
   return <WellnessSettings />;
 }
 

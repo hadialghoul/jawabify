@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   FlaskConical,
   Briefcase,
+  MessageCircleQuestion,
 } from "lucide-react";
 
 import { Instagram, MessagesSquare } from "lucide-react";
@@ -72,6 +73,7 @@ const ITEMS_BY_VERTICAL: Record<string, RailItem[]> = {
   ecommerce: [
     ...COMMON_HEAD,
     { key: "orders", label: "Orders", icon: Package },
+    { key: "no_order", label: "No order yet", icon: MessageCircleQuestion },
     ...COMMON_TAIL,
   ],
   restaurant: [
@@ -80,6 +82,7 @@ const ITEMS_BY_VERTICAL: Record<string, RailItem[]> = {
     { key: "reservations", label: "Reservations", icon: CalendarDays },
     { key: "menu", label: "Menu", icon: BookOpen },
     { key: "tables", label: "Tables", icon: LayoutGrid },
+    { key: "no_order", label: "No order yet", icon: MessageCircleQuestion },
     ...COMMON_TAIL,
   ],
   real_estate: [
@@ -91,7 +94,13 @@ const ITEMS_BY_VERTICAL: Record<string, RailItem[]> = {
     ...COMMON_TAIL,
   ],
   wellness: WELLNESS_ITEMS,
-  service: WELLNESS_ITEMS,
+  service: [
+    ...COMMON_HEAD,
+    { key: "services", label: "Services", icon: Briefcase },
+    { key: "sessions", label: "Bookings", icon: CalendarDays },
+    { key: "leads", label: "Enquiries", icon: UserPlus },
+    ...COMMON_TAIL,
+  ],
   healthcare: [
     ...COMMON_HEAD,
     { key: "team", label: "Team", icon: Stethoscope },

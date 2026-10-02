@@ -1,3 +1,4 @@
+import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
 // Real estate vertical flow — isolated from e-commerce and restaurant.
 // Only invoked when tenant.vertical === 'real_estate'. Writes go ONLY to
 // listings/leads/viewings/agents (all guarded by guard_real_estate_only trigger).
@@ -414,7 +415,8 @@ export async function runRealEstateFlow(opts: {
     tenantPhoneNumberId, tenantAccessToken, conversationHistory: history,
     matchedListings: [], lastViewing: null, flowStarted: false,
   };
-  let messages: any[] = [{ role: "system", content: systemPrompt }, ...history];
+  const __payLink = await getOnlinePaymentLink(supabase, tenantId).catch(() => null);
+  let messages: any[] = [{ role: "system", content: systemPrompt + onlinePaymentPrompt(__payLink) }, ...history];
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {

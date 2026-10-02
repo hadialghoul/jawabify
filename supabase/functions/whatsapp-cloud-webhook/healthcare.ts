@@ -1,3 +1,4 @@
+import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
 // Healthcare vertical flow — isolated from ecommerce/restaurant/real_estate/wellness.
 // Invoked only when tenant.vertical === 'healthcare'. Writes only to healthcare_*
 // tables (each guarded by guard_healthcare_only trigger).
@@ -276,7 +277,8 @@ export async function runHealthcareFlow(opts: {
     conversationHistory: history,
     flowStarted: false,
   };
-  let messages: any[] = [{ role: "system", content: systemPrompt }, ...history];
+  const __payLink = await getOnlinePaymentLink(supabase, tenantId).catch(() => null);
+  let messages: any[] = [{ role: "system", content: systemPrompt + onlinePaymentPrompt(__payLink) }, ...history];
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {

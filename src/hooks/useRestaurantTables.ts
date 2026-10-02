@@ -8,6 +8,8 @@ export interface RTable {
   seats: number;
   notes: string | null;
   sort_order: number;
+  floor: number | null;
+  seating_area: string | null;
 }
 
 export function useRestaurantTables() {
@@ -20,7 +22,7 @@ export function useRestaurantTables() {
     setLoading(true);
     const { data } = await supabase
       .from("restaurant_tables")
-      .select("id,label,seats,notes,sort_order")
+      .select("id,label,seats,notes,sort_order,floor,seating_area")
       .eq("tenant_id", tenantId)
       .order("sort_order", { ascending: true });
     setTables((data ?? []) as RTable[]);
@@ -38,10 +40,10 @@ export function useRestaurantTables() {
     return () => { supabase.removeChannel(ch); };
   }, [tenantId, fetch]);
 
-  const addTable = async (label: string, seats: number) => {
+  const addTable = async (label: string, seats: number, extra: { floor?: number | null; seating_area?: string | null } = {}) => {
     if (!tenantId) return;
     const sort_order = (tables[tables.length - 1]?.sort_order ?? 0) + 1;
-    await supabase.from("restaurant_tables").insert({ tenant_id: tenantId, label, seats, sort_order });
+    await supabase.from("restaurant_tables").insert({ tenant_id: tenantId, label, seats, sort_order, ...extra });
   };
   const updateTable = async (id: string, patch: Partial<RTable>) => {
     setTables((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));

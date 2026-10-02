@@ -1,0 +1,3 @@
+ALTER TABLE public.reservations ALTER COLUMN ends_at DROP NOT NULL;
+ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS floor integer, ADD COLUMN IF NOT EXISTS seating_area text;
+ALTER TABLE public.restaurant_settings ADD COLUMN IF NOT EXISTS floors_count integer NOT NULL DEFAULT 1, ADD COLUMN IF NOT EXISTS has_indoor boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS has_outdoor boolean NOT NULL DEFAULT false;

@@ -209,6 +209,57 @@ export type Database = {
           },
         ]
       }
+      app_user_connections: {
+        Row: {
+          connection_key_ciphertext: string
+          connector_id: string
+          created_at: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          connection_key_ciphertext: string
+          connector_id: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          connection_key_ciphertext?: string
+          connector_id?: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      app_user_oauth_nonces: {
+        Row: {
+          connector_id: string
+          created_at: string
+          expires_at: string
+          nonce: string
+          user_id: string
+        }
+        Insert: {
+          connector_id: string
+          created_at?: string
+          expires_at?: string
+          nonce: string
+          user_id: string
+        }
+        Update: {
+          connector_id?: string
+          created_at?: string
+          expires_at?: string
+          nonce?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       bill_items: {
         Row: {
           bill_id: string
@@ -521,6 +572,7 @@ export type Database = {
           email: string
           full_name: string
           id: string
+          lead_status: string
           phone: string
           source_path: string | null
           user_agent: string | null
@@ -530,6 +582,7 @@ export type Database = {
           email: string
           full_name: string
           id?: string
+          lead_status?: string
           phone: string
           source_path?: string | null
           user_agent?: string | null
@@ -539,6 +592,7 @@ export type Database = {
           email?: string
           full_name?: string
           id?: string
+          lead_status?: string
           phone?: string
           source_path?: string | null
           user_agent?: string | null
@@ -564,6 +618,7 @@ export type Database = {
           interested_at: string | null
           is_interested: boolean
           is_online: boolean | null
+          lead_status: string
           name: string | null
           needs_human: boolean
           notes: string | null
@@ -594,6 +649,7 @@ export type Database = {
           interested_at?: string | null
           is_interested?: boolean
           is_online?: boolean | null
+          lead_status?: string
           name?: string | null
           needs_human?: boolean
           notes?: string | null
@@ -624,6 +680,7 @@ export type Database = {
           interested_at?: string | null
           is_interested?: boolean
           is_online?: boolean | null
+          lead_status?: string
           name?: string | null
           needs_human?: boolean
           notes?: string | null
@@ -2258,6 +2315,53 @@ export type Database = {
           },
         ]
       }
+      quick_answers: {
+        Row: {
+          answer_text: string | null
+          answer_type: string
+          audio_mime: string | null
+          audio_url: string | null
+          created_at: string
+          enabled: boolean
+          id: string
+          question: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          answer_text?: string | null
+          answer_type?: string
+          audio_mime?: string | null
+          audio_url?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          question: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          answer_text?: string | null
+          answer_type?: string
+          audio_mime?: string | null
+          audio_url?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          question?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quick_answers_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       real_estate_settings: {
         Row: {
           areas_covered: string[]
@@ -2321,7 +2425,8 @@ export type Database = {
         Row: {
           contact_id: string | null
           created_at: string
-          ends_at: string
+          ends_at: string | null
+          floor: number | null
           guest_name: string
           guest_phone: string | null
           id: string
@@ -2329,6 +2434,7 @@ export type Database = {
           party_size: number
           reminder_at: string | null
           reminder_sent_at: string | null
+          seating_area: string | null
           source: string
           starts_at: string
           status: string
@@ -2339,7 +2445,8 @@ export type Database = {
         Insert: {
           contact_id?: string | null
           created_at?: string
-          ends_at: string
+          ends_at?: string | null
+          floor?: number | null
           guest_name: string
           guest_phone?: string | null
           id?: string
@@ -2347,6 +2454,7 @@ export type Database = {
           party_size?: number
           reminder_at?: string | null
           reminder_sent_at?: string | null
+          seating_area?: string | null
           source?: string
           starts_at: string
           status?: string
@@ -2357,7 +2465,8 @@ export type Database = {
         Update: {
           contact_id?: string | null
           created_at?: string
-          ends_at?: string
+          ends_at?: string | null
+          floor?: number | null
           guest_name?: string
           guest_phone?: string | null
           id?: string
@@ -2365,6 +2474,7 @@ export type Database = {
           party_size?: number
           reminder_at?: string | null
           reminder_sent_at?: string | null
+          seating_area?: string | null
           source?: string
           starts_at?: string
           status?: string
@@ -2394,6 +2504,9 @@ export type Database = {
           created_at: string
           daily_specials: string | null
           eta_text: string | null
+          floors_count: number
+          has_indoor: boolean
+          has_outdoor: boolean
           human_transfer_phone: string | null
           kitchen_notify_phone: string | null
           max_party_size: number | null
@@ -2406,6 +2519,9 @@ export type Database = {
           created_at?: string
           daily_specials?: string | null
           eta_text?: string | null
+          floors_count?: number
+          has_indoor?: boolean
+          has_outdoor?: boolean
           human_transfer_phone?: string | null
           kitchen_notify_phone?: string | null
           max_party_size?: number | null
@@ -2418,6 +2534,9 @@ export type Database = {
           created_at?: string
           daily_specials?: string | null
           eta_text?: string | null
+          floors_count?: number
+          has_indoor?: boolean
+          has_outdoor?: boolean
           human_transfer_phone?: string | null
           kitchen_notify_phone?: string | null
           max_party_size?: number | null
@@ -2439,9 +2558,11 @@ export type Database = {
       restaurant_tables: {
         Row: {
           created_at: string
+          floor: number | null
           id: string
           label: string
           notes: string | null
+          seating_area: string | null
           seats: number
           sort_order: number
           tenant_id: string
@@ -2449,9 +2570,11 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          floor?: number | null
           id?: string
           label: string
           notes?: string | null
+          seating_area?: string | null
           seats?: number
           sort_order?: number
           tenant_id: string
@@ -2459,9 +2582,11 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          floor?: number | null
           id?: string
           label?: string
           notes?: string | null
+          seating_area?: string | null
           seats?: number
           sort_order?: number
           tenant_id?: string
@@ -2665,8 +2790,10 @@ export type Database = {
           phone_number: string | null
           phone_number_id: string | null
           provider: string
+          refresh_token: string | null
           shop_domain: string | null
           tenant_id: string
+          token_expires_at: string | null
           updated_at: string
           verify_token: string | null
           waba_id: string | null
@@ -2685,8 +2812,10 @@ export type Database = {
           phone_number?: string | null
           phone_number_id?: string | null
           provider: string
+          refresh_token?: string | null
           shop_domain?: string | null
           tenant_id: string
+          token_expires_at?: string | null
           updated_at?: string
           verify_token?: string | null
           waba_id?: string | null
@@ -2705,8 +2834,10 @@ export type Database = {
           phone_number?: string | null
           phone_number_id?: string | null
           provider?: string
+          refresh_token?: string | null
           shop_domain?: string | null
           tenant_id?: string
+          token_expires_at?: string | null
           updated_at?: string
           verify_token?: string | null
           waba_id?: string | null
@@ -2922,6 +3053,24 @@ export type Database = {
           id?: string
           step_id?: string | null
           step_index?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_lead_tags: {
+        Row: {
+          lead_status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          lead_status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          lead_status?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -3400,6 +3549,7 @@ export type Database = {
       }
       wellness_settings: {
         Row: {
+          address: string | null
           bot_tone: string
           calendly_url: string | null
           created_at: string
@@ -3409,14 +3559,18 @@ export type Database = {
           google_sheet_url: string | null
           human_transfer_phone: string | null
           languages: string[]
+          maps_url: string | null
+          opening_hours: Json
           payment_link: string | null
           reminder_hours_before: number
           second_reminder_hours_before: number
           session_duration_min: number
           tenant_id: string
+          timezone: string
           updated_at: string
         }
         Insert: {
+          address?: string | null
           bot_tone?: string
           calendly_url?: string | null
           created_at?: string
@@ -3426,14 +3580,18 @@ export type Database = {
           google_sheet_url?: string | null
           human_transfer_phone?: string | null
           languages?: string[]
+          maps_url?: string | null
+          opening_hours?: Json
           payment_link?: string | null
           reminder_hours_before?: number
           second_reminder_hours_before?: number
           session_duration_min?: number
           tenant_id: string
+          timezone?: string
           updated_at?: string
         }
         Update: {
+          address?: string | null
           bot_tone?: string
           calendly_url?: string | null
           created_at?: string
@@ -3443,11 +3601,14 @@ export type Database = {
           google_sheet_url?: string | null
           human_transfer_phone?: string | null
           languages?: string[]
+          maps_url?: string | null
+          opening_hours?: Json
           payment_link?: string | null
           reminder_hours_before?: number
           second_reminder_hours_before?: number
           session_duration_min?: number
           tenant_id?: string
+          timezone?: string
           updated_at?: string
         }
         Relationships: [
@@ -3577,20 +3738,23 @@ export type Database = {
         Args: { p_max_minutes?: number }
         Returns: number
       }
-      delete_email: {
-        Args: { message_id: number; queue_name: string }
-        Returns: boolean
-      }
-      email_queue_dispatch: { Args: never; Returns: undefined }
-      enqueue_email: {
-        Args: { payload: Json; queue_name: string }
-        Returns: number
-      }
       get_assignment_counts: {
         Args: { p_tenant_id: string }
         Returns: {
           assigned_count: number
           member_id: string
+        }[]
+      }
+      get_campaign_real_counts: {
+        Args: { p_campaign_ids: string[] }
+        Returns: {
+          campaign_id: string
+          delivered: number
+          failed: number
+          read: number
+          replied: number
+          sent: number
+          total: number
         }[]
       }
       get_contact_previews: {
@@ -3688,23 +3852,6 @@ export type Database = {
           id: string
           similarity: number
           title: string
-        }[]
-      }
-      move_to_dlq: {
-        Args: {
-          dlq_name: string
-          message_id: number
-          payload: Json
-          source_queue: string
-        }
-        Returns: number
-      }
-      read_email_batch: {
-        Args: { batch_size: number; queue_name: string; vt: number }
-        Returns: {
-          message: Json
-          msg_id: number
-          read_ct: number
         }[]
       }
       release_stale_campaign_locks: {

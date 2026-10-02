@@ -271,7 +271,8 @@ async function readStatus(admin: any, tenantId: string): Promise<any | null> {
 }
 
 
-const CHUNK_SIZE = 12;
+const CHUNK_SIZE = 50;
+const PRODUCT_CONCURRENCY = 8;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -427,17 +428,9 @@ Deno.serve(async (req) => {
     const RUN_BUDGET_MS = 100_000;
 
     const run = async () => {
-      const { data: existingImgs } = await admin
-        .from("knowledge_images")
-        .select("description")
-        .eq("tenant_id", tenantId)
-        .ilike("description", "%[shopify:%");
-      const existingTags = new Set<string>(
-        (existingImgs || []).map((r: any) => {
-          const m = String(r.description || "").match(/\[shopify:(\d+):(\d+)\]/);
-          return m ? `${m[1]}:${m[2]}` : "";
-        }).filter(Boolean)
-      );
+      // Photos are de-duplicated by the database (unique tenant + shopify tag),
+      // so no giant preload of every saved photo is needed.
+      const existingTags = new Set<string>();
 
       let hasNextPage = true;
 
@@ -454,7 +447,16 @@ Deno.serve(async (req) => {
         }
         const products = page.products.filter((p: any) => p.status !== "archived");
 
-        for (const p of products) {
+        // Preload existing rows for this page so unchanged products skip re-embedding.
+        const pagePids = products.map((p: any) => String(p.id));
+        const { data: existingRows } = await admin
+          .from("ai_knowledge")
+          .select("id, shopify_product_id, content, has_emb:embedding")
+          .eq("tenant_id", tenantId)
+          .in("shopify_product_id", pagePids);
+        const existingByPid = new Map<string, any>((existingRows || []).map((r: any) => [String(r.shopify_product_id), r]));
+
+        const processOne = async (p: any) => {
           const title = String(p.title || "Untitled");
           const pid = String(p.id);
           lastTitle = title;
@@ -471,8 +473,10 @@ Deno.serve(async (req) => {
             failed.push({ product: title, product_id: pid, reason: "Variant missing price" });
           }
 
-          const embedding = await generateEmbedding(`${title}\n${text}`, LOVABLE_API_KEY);
-          if (!embedding) {
+          const prevRow = existingByPid.get(pid);
+          const unchanged = prevRow && prevRow.content === text && prevRow.has_emb;
+          const embedding = unchanged ? null : await generateEmbedding(`${title}\n${text}`, LOVABLE_API_KEY);
+          if (!embedding && !unchanged) {
             failed.push({ product: title, product_id: pid, reason: "Embedding generation failed" });
           }
 
@@ -486,14 +490,8 @@ Deno.serve(async (req) => {
           };
           if (embedding) row.embedding = embedding as any;
 
-          const { data: existing } = await admin
-            .from("ai_knowledge")
-            .select("id")
-            .eq("tenant_id", tenantId)
-            .eq("shopify_product_id", pid)
-            .maybeSingle();
-
-          if (existing) await admin.from("ai_knowledge").update(row).eq("id", existing.id);
+          if (unchanged) { /* nothing to write */ }
+          else if (prevRow) await admin.from("ai_knowledge").update(row).eq("id", prevRow.id);
           else await admin.from("ai_knowledge").insert(row);
           counters.products++;
 
@@ -502,48 +500,41 @@ Deno.serve(async (req) => {
             failed.push({ product: title, product_id: pid, reason: "No images on product" });
           }
 
-          for (let i = 0; i < imgs.length; i += 10) {
-            const slice = imgs.slice(i, i + 10);
-            await Promise.all(slice.map(async (im: any) => {
-              const imageId = String(im.id || "");
-              const src: string = im.src || "";
-              if (!imageId || !src) return;
-              const tag = `${pid}:${imageId}`;
-              if (existingTags.has(tag)) { counters.skipped_existing_images++; return; }
-
-              try {
-                const { fetchUrl, ext } = shopifyCompatibleImageUrl(src);
-                const resp = await downloadWithTimeout(fetchUrl, 5000);
-                if (!resp.ok) {
-                  failed.push({ product: title, product_id: pid, reason: `Image download failed (HTTP ${resp.status})` });
-                  return;
-                }
-                const bytes = new Uint8Array(await resp.arrayBuffer());
-                const path = `knowledge/shopify/${pid}-${imageId}.${ext}`;
-                const { error: upErr } = await admin.storage.from("chat-media").upload(path, bytes, {
-                  contentType: extToContentType(ext),
-                  upsert: true,
-                });
-                if (upErr) {
-                  failed.push({ product: title, product_id: pid, reason: `Image upload failed: ${upErr.message}` });
-                  return;
-                }
-                const { data: pub } = admin.storage.from("chat-media").getPublicUrl(path);
-                await admin.from("knowledge_images").insert({
-                  tenant_id: tenantId,
-                  image_url: pub.publicUrl,
-                  label: title,
-                  description: `${title} [shopify:${pid}:${imageId}]`,
-                  is_active: true,
-                } as any);
-                existingTags.add(tag);
-                counters.images++;
-              } catch (e: any) {
-                const reason = e?.name === "AbortError" ? "Image timed out" : `Image download failed: ${e?.message || e}`;
-                failed.push({ product: title, product_id: pid, reason });
-              }
-            }));
+          // Use Shopify's own photo links directly (no download/re-upload) and
+          // save them in one write; duplicates are ignored by the database.
+          const imgRows = imgs
+            .filter((im: any) => im?.id && im?.src)
+            .slice(0, 0) // photos are never saved; fetched live from Shopify on request
+            .map((im: any) => ({
+              tenant_id: tenantId,
+              image_url: String(im.src),
+              label: title,
+              description: `${title} [shopify:${pid}:${im.id}]`,
+              is_active: true,
+            }))
+            .filter((r: any) => !existingTags.has(r.description));
+          if (imgRows.length) {
+            const { data: ins, error: imgErr } = await admin
+              .from("knowledge_images")
+              .upsert(imgRows as any, { onConflict: "tenant_id,description", ignoreDuplicates: true })
+              .select("id");
+            if (imgErr) {
+              failed.push({ product: title, product_id: pid, reason: `Photo save failed: ${imgErr.message}` });
+            } else {
+              const added = ins?.length ?? 0;
+              counters.images += added;
+              counters.skipped_existing_images += imgRows.length - added;
+              imgRows.forEach((r: any) => existingTags.add(r.description));
+            }
           }
+        };
+
+        for (let i = 0; i < products.length; i += PRODUCT_CONCURRENCY) {
+          await Promise.all(products.slice(i, i + PRODUCT_CONCURRENCY).map((p: any) =>
+            processOne(p).catch((e: any) => {
+              failed.push({ product: String(p.title || ""), product_id: String(p.id), reason: e?.message || String(e) });
+            })
+          ));
         }
 
         batches++;

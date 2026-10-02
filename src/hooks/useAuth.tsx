@@ -145,15 +145,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
         const nextUserId = session?.user?.id ?? null;
 
-        // Skip heavy reload when the same user is already loaded (tab refocus
-        // fires TOKEN_REFRESHED / SIGNED_IN / INITIAL_SESSION with same uid).
+        // Tab refocus fires TOKEN_REFRESHED / SIGNED_IN with the same uid.
+        // Keep the existing user object so dependent screens don't re-run.
         if (nextUserId && nextUserId === currentUserId) {
+          setSession(session);
           return;
         }
+
+        setSession(session);
+        setUser(session?.user ?? null);
 
         currentUserId = nextUserId;
 

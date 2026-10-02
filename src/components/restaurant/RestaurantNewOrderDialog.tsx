@@ -32,6 +32,7 @@ interface Props {
     productName: string;
     quantity: number;
     deliveryFee: number;
+    totalPrice?: number;
   }) => void;
   initialData?: { customerName?: string; customerPhone?: string };
 }
@@ -138,6 +139,7 @@ export function RestaurantNewOrderDialog({ open, onOpenChange, onCreateOrder, in
       productName,
       quantity: Math.max(1, totalQty),
       deliveryFee: finalFee,
+      totalPrice: totalAmount > 0 ? Math.round(totalAmount * 100) / 100 : undefined,
     });
     setIsSubmitting(false);
     reset();

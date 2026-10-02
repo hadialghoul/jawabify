@@ -72,7 +72,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         );
       }
       if (isEmbeddedShopify()) {
-        return <Navigate to={withShop('/shopify/connect', readShopFromUrl())} replace />;
+        return <Navigate to={withShop('/shopify/app', readShopFromUrl())} replace />;
       }
       return <Navigate to="/subscribe" replace />;
     }

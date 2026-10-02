@@ -39,6 +39,10 @@ export default function Onboarding() {
   const [vertical, setVertical] = useState<Vertical | null>(
     initialVertical && VERTICALS.some((v) => v.id === initialVertical) ? initialVertical : null
   );
+  const initialUsesShopify = (user?.user_metadata as any)?.uses_shopify;
+  const [usesShopify, setUsesShopify] = useState<boolean | null>(
+    typeof initialUsesShopify === 'boolean' ? initialUsesShopify : null
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
@@ -186,6 +190,10 @@ export default function Onboarding() {
       toast.error('Please complete all fields');
       return;
     }
+    if (vertical === 'ecommerce' && usesShopify === null) {
+      toast.error('Please choose whether you use Shopify');
+      return;
+    }
     setSavingIdentity(true);
     try {
       const displayName = `${firstName.trim()} ${familyName.trim()}`;
@@ -197,6 +205,7 @@ export default function Onboarding() {
           business_name: businessName.trim(),
           business_type: vertical,
           vertical,
+          uses_shopify: vertical === 'ecommerce' ? usesShopify : null,
         },
       });
       if (error) throw error;
@@ -308,7 +317,15 @@ export default function Onboarding() {
       // Merchants who arrived from a Shopify install go back to the connector
       // screen — never to a checkout inside/after the Shopify flow (policy 1.2.1).
       const shop = readShopFromUrl();
-      window.location.href = shop ? withShop('/shopify/connect', shop) : '/subscribe';
+      if (shop) {
+        window.location.href = withShop('/shopify/connect', shop);
+      } else if (vertical === 'ecommerce' && usesShopify === true) {
+        // Shopify sellers are billed through Shopify, so they go to the Shopify
+        // connector/plan screen instead of the Stripe checkout.
+        window.location.href = '/shopify/connect';
+      } else {
+        window.location.href = '/subscribe';
+      }
     } catch (error: any) {
 
       toast.error(error.message || 'Failed to complete setup');
@@ -369,6 +386,30 @@ export default function Onboarding() {
                   </p>
                 </div>
               </div>
+
+              {vertical === 'ecommerce' && (
+                <div className="space-y-1.5">
+                  <Label>Do you sell on Shopify?</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { v: true, label: 'Yes, I use Shopify', hint: 'Sync products & orders' },
+                      { v: false, label: 'No Shopify', hint: 'Add products manually' },
+                    ] as const).map((o) => (
+                      <button
+                        key={String(o.v)}
+                        type="button"
+                        onClick={() => setUsesShopify(o.v)}
+                        className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                          usesShopify === o.v ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/60'
+                        }`}
+                      >
+                        <div className="text-sm font-semibold">{o.label}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">{o.hint}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <Button type="submit" className="w-full" disabled={savingIdentity}>
                 {savingIdentity ? 'Saving...' : 'Continue'}

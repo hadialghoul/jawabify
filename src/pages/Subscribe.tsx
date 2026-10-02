@@ -6,6 +6,7 @@ import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { useSubscription } from "@/hooks/useSubscription";
 import { isEmbeddedShopify, readShopFromUrl, withShop } from "@/lib/shopifyEmbedded";
 import { useBillingOrigin } from "@/hooks/useBillingOrigin";
+import { isNativeApp, openSubscribeInBrowser, openSystemBrowser } from "@/lib/mobileBridge";
 import { Loader2, ShieldCheck, Check, Store, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -19,6 +20,7 @@ export default function Subscribe() {
   const [billingShop, setBillingShop] = useState<string | null>(null);
   const [startingBilling, setStartingBilling] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const nativeApp = isNativeApp();
 
   const PLANS = {
     starter: { label: "Starter", price: 45, priceId: "jawabify_pro_monthly_v2" },
@@ -58,7 +60,7 @@ export default function Subscribe() {
   }, [isShopifyBilled, shopDomain]);
 
   if (embedded) {
-    return <Navigate to={withShop("/shopify/connect", readShopFromUrl())} replace />;
+    return <Navigate to={withShop("/shopify/app", readShopFromUrl())} replace />;
   }
 
   if (!authChecked || loading || originLoading) {
@@ -85,9 +87,13 @@ export default function Subscribe() {
         navigate("/app", { replace: true });
         return;
       }
-      // The approval screen is hosted by Shopify outside our app — open it in a
-      // new tab so the user returns to Jawabify after approving.
-      window.open(data.confirmation_url, "_blank", "noopener");
+      // The approval screen is hosted by Shopify outside our app. On the phone
+      // that has to be the system browser; on the web, a new tab.
+      if (isNativeApp()) {
+        await openSystemBrowser(data.confirmation_url);
+      } else {
+        window.open(data.confirmation_url, "_blank", "noopener");
+      }
     } catch (e) {
       setBillingError((e as Error).message);
     } finally {
@@ -164,6 +170,17 @@ export default function Subscribe() {
                 {billingError}
               </p>
             )}
+          </div>
+        ) : nativeApp ? (
+          <div className="mx-auto max-w-md space-y-4">
+            <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
+              <strong className="block mb-1">Continue in your browser</strong>
+              Card checkout is not available inside the app. We will open the secure subscribe page on app.jawabify.com.
+            </div>
+            <Button className="w-full" size="lg" onClick={() => void openSubscribeInBrowser()}>
+              Open subscribe page
+              <ExternalLink className="h-4 w-4 ml-2" />
+            </Button>
           </div>
         ) : (
           <>

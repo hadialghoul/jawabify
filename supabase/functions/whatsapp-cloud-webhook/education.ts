@@ -1,3 +1,4 @@
+import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
 // Education vertical flow — isolated. Writes only to education_* tables.
 import {
   getActiveEducationSession,
@@ -195,7 +196,8 @@ export async function runEducationFlow(opts: {
     supabase, tenantId, contact, phoneNumber, courses, settings, lead,
     tenantPhoneNumberId, tenantAccessToken, conversationHistory: history, flowStarted: false,
   };
-  let messages: any[] = [{ role: "system", content: systemPrompt }, ...history];
+  const __payLink = await getOnlinePaymentLink(supabase, tenantId).catch(() => null);
+  let messages: any[] = [{ role: "system", content: systemPrompt + onlinePaymentPrompt(__payLink) }, ...history];
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {

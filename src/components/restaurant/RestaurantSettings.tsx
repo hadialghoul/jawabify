@@ -36,6 +36,9 @@ export function RestaurantSettings() {
   const [reminderHrs, setReminderHrs] = useState<string>("2");
   const [kitchenPhone, setKitchenPhone] = useState("");
   const [humanPhone, setHumanPhone] = useState("");
+  const [floors, setFloors] = useState("1");
+  const [indoor, setIndoor] = useState(false);
+  const [outdoor, setOutdoor] = useState(false);
 
   useEffect(() => {
     if (!loading) setFee(String(defaultFee));
@@ -68,6 +71,9 @@ export function RestaurantSettings() {
     setSpecials(settings.daily_specials ?? "");
     setHours(settings.opening_hours ?? ({} as OpeningHours));
     setMaxParty(String(settings.max_party_size ?? 10));
+    setFloors(String(settings.floors_count ?? 1));
+    setIndoor(!!settings.has_indoor);
+    setOutdoor(!!settings.has_outdoor);
     setReminderHrs(String(settings.reminder_hours_before ?? 2));
     setKitchenPhone(settings.kitchen_notify_phone ?? "");
     setHumanPhone(settings.human_transfer_phone ?? "");
@@ -76,8 +82,6 @@ export function RestaurantSettings() {
   const toggleUpsell = async (v: boolean) => {
     if (!tenantId) return;
     setUpsell(v);
-    // Keep the global switch (Settings → AI Auto-Replies) and the legacy
-    // restaurant-only key in sync so both screens show the same state.
     await supabase.from("app_settings").upsert(
       [
         { tenant_id: tenantId, key: "ai_upsell_enabled", value: v as any },
@@ -88,12 +92,14 @@ export function RestaurantSettings() {
     toast.success(v ? "Upsell enabled" : "Upsell disabled");
   };
 
-
   const saveHours = () => save({ opening_hours: hours });
   const saveReservationsCfg = () =>
     save({
       max_party_size: parseInt(maxParty) || 10,
       reminder_hours_before: parseInt(reminderHrs) || 2,
+      floors_count: Math.max(1, parseInt(floors) || 1),
+      has_indoor: indoor,
+      has_outdoor: outdoor,
     });
 
   return (
@@ -231,6 +237,22 @@ export function RestaurantSettings() {
                 onChange={(e) => setReminderHrs(e.target.value)}
               />
             </div>
+          </div>
+          <div className="space-y-3 max-w-md pt-2">
+            <div>
+              <Label>Number of floors</Label>
+              <Input type="number" min={1} value={floors} onChange={(e) => setFloors(e.target.value)} />
+              <p className="text-xs text-muted-foreground mt-1">If more than 1, the AI asks which floor the guest prefers.</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <Label>Has indoor seating</Label>
+              <Switch checked={indoor} onCheckedChange={setIndoor} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label>Has outdoor seating</Label>
+              <Switch checked={outdoor} onCheckedChange={setOutdoor} />
+            </div>
+            <p className="text-xs text-muted-foreground">If both are on, the AI asks indoor or outdoor. Otherwise it doesn't ask.</p>
           </div>
           <Button onClick={saveReservationsCfg}>Save</Button>
         </CardContent>

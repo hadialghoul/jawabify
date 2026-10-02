@@ -70,6 +70,34 @@ async function uploadAudioToMeta(
   }
 }
 
+async function uploadMediaToMeta(
+  mediaUrl: string,
+  mime: string,
+  fileName: string,
+  phoneNumberId: string,
+  accessToken: string,
+): Promise<{ id?: string; error?: string }> {
+  try {
+    const res = await fetch(mediaUrl);
+    if (!res.ok) return { error: `download failed (${res.status})` };
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', mime);
+    form.append('file', new Blob([bytes], { type: mime }), fileName || 'file');
+    const up = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    });
+    const json = await up.json().catch(() => ({}));
+    if (!up.ok || !json?.id) return { error: JSON.stringify(json) };
+    return { id: json.id as string };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -160,6 +188,15 @@ serve(async (req) => {
         type: 'image',
         image: { link: mediaUrl, ...(message ? { caption: message } : {}) },
       };
+      // Upload bytes directly so Meta never has to fetch the link (link
+      // fetches fail silently after Meta already returned "sent").
+      const imgMime = ['image/jpeg', 'image/png'].includes(type) ? type : 'image/jpeg';
+      const up = await uploadMediaToMeta(mediaUrl, imgMime, derivedName, phoneNumberId, accessToken);
+      if (up.id) {
+        body.image = { id: up.id, ...(message ? { caption: message } : {}) };
+      } else {
+        console.warn('Image upload to Meta failed, falling back to link:', up.error);
+      }
     } else if (mediaUrl && (WA_AUDIO.includes(type) || type.startsWith('audio/'))) {
       // Meta rejects audio fetched by link when the served Content-Type doesn't
       // match the real container (error 131053). Download, sniff the container

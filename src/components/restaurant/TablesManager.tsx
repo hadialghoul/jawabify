@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRestaurantTables, type RTable } from "@/hooks/useRestaurantTables";
+import { useRestaurantSettings } from "@/hooks/useRestaurantSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,14 +16,24 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+const selectCls =
+  "h-10 w-full rounded-md border border-input bg-background px-2 text-base md:text-sm";
+
 export function TablesManager() {
   const { tables, addTable, deleteTable, updateTable } = useRestaurantTables();
+  const { settings } = useRestaurantSettings();
+  const floorsCount = Math.max(1, settings?.floors_count ?? 1);
+  const showFloor = floorsCount > 1;
+  const showArea = !!settings?.has_indoor && !!settings?.has_outdoor;
+  const floorOptions = Array.from({ length: floorsCount }, (_, i) => i + 1);
+
   const [newLabel, setNewLabel] = useState("");
   const [newSeats, setNewSeats] = useState(4);
+  const [newFloor, setNewFloor] = useState("1");
+  const [newArea, setNewArea] = useState("indoor");
   const [pendingDelete, setPendingDelete] = useState<RTable | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // local drafts so typing is instant; saved after a short pause
   const [drafts, setDrafts] = useState<Record<string, { label?: string; seats?: number }>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -36,9 +47,8 @@ export function TablesManager() {
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
     if (timers.current[id]) clearTimeout(timers.current[id]);
     timers.current[id] = setTimeout(async () => {
-      const merged = { ...patch };
       try {
-        await updateTable(id, merged);
+        await updateTable(id, { ...patch });
         setDrafts((prev) => {
           const next = { ...prev };
           delete next[id];
@@ -48,6 +58,14 @@ export function TablesManager() {
         toast.error("Couldn't save the table");
       }
     }, 600);
+  };
+
+  const saveNow = async (id: string, patch: Partial<RTable>) => {
+    try {
+      await updateTable(id, patch);
+    } catch {
+      toast.error("Couldn't save the table");
+    }
   };
 
   const value = useMemo(
@@ -65,14 +83,34 @@ export function TablesManager() {
           <label className="text-xs text-muted-foreground">Label</label>
           <Input value={newLabel} placeholder="T7 / Patio 1" onChange={(e) => setNewLabel(e.target.value)} />
         </div>
-        <div className="w-full sm:w-28">
+        <div className="w-full sm:w-24">
           <label className="text-xs text-muted-foreground">Seats</label>
           <Input type="number" min={1} max={50} value={newSeats} onChange={(e) => setNewSeats(parseInt(e.target.value) || 1)} />
         </div>
+        {showFloor && (
+          <div className="w-full sm:w-28">
+            <label className="text-xs text-muted-foreground">Floor</label>
+            <select className={selectCls} value={newFloor} onChange={(e) => setNewFloor(e.target.value)}>
+              {floorOptions.map((f) => <option key={f} value={f}>Floor {f}</option>)}
+            </select>
+          </div>
+        )}
+        {showArea && (
+          <div className="w-full sm:w-32">
+            <label className="text-xs text-muted-foreground">Area</label>
+            <select className={selectCls} value={newArea} onChange={(e) => setNewArea(e.target.value)}>
+              <option value="indoor">Indoor</option>
+              <option value="outdoor">Outdoor</option>
+            </select>
+          </div>
+        )}
         <Button
           onClick={async () => {
             if (!newLabel.trim()) return toast.error("Add a label");
-            await addTable(newLabel.trim(), newSeats);
+            await addTable(newLabel.trim(), newSeats, {
+              floor: showFloor ? parseInt(newFloor) : null,
+              seating_area: showArea ? newArea : null,
+            });
             setNewLabel("");
             setNewSeats(4);
           }}
@@ -107,6 +145,27 @@ export function TablesManager() {
                   className="h-8"
                 />
               </div>
+              {showFloor && (
+                <select
+                  className={selectCls}
+                  value={t.floor ?? ""}
+                  onChange={(e) => saveNow(t.id, { floor: e.target.value ? parseInt(e.target.value) : null })}
+                >
+                  <option value="">Any floor</option>
+                  {floorOptions.map((f) => <option key={f} value={f}>Floor {f}</option>)}
+                </select>
+              )}
+              {showArea && (
+                <select
+                  className={selectCls}
+                  value={t.seating_area ?? ""}
+                  onChange={(e) => saveNow(t.id, { seating_area: e.target.value || null })}
+                >
+                  <option value="">Any area</option>
+                  <option value="indoor">Indoor</option>
+                  <option value="outdoor">Outdoor</option>
+                </select>
+              )}
             </div>
           );
         })}

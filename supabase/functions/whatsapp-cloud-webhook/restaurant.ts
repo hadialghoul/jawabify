@@ -105,9 +105,10 @@ const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 function isWithinOpeningHours(hours: any, iso: string): { ok: boolean; reason?: string } {
   if (!hours || typeof hours !== "object") return { ok: true };
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return { ok: false, reason: "invalid_date" };
-  const key = DAY_KEYS[d.getUTCDay()]; // best effort; tenants set tz-aware text anyway
+  const utc = new Date(iso);
+  if (isNaN(utc.getTime())) return { ok: false, reason: "invalid_date" };
+  const d = new Date(utc.getTime() + 3 * 3600_000); // Beirut local time
+  const key = DAY_KEYS[d.getUTCDay()];
   const h = hours[key];
   if (!h) return { ok: true };
   if (h.closed) return { ok: false, reason: "closed_that_day" };
@@ -159,7 +160,11 @@ STEP 4 — UPSELL (no longer your job)
 ${upsellEnabled ? "Upsell happens inside the programmatic flow." : "Upsell is disabled."}
 
 STEP 5 — RESERVATIONS (still your job)
-For reservations: collect guest_name, party_size, starts_at (ISO timestamp), and ALWAYS ask once for special requests (birthday, high chair, allergies). Put those into notes.
+NOW (Beirut time): ${new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 16).replace("T", " ")} (${DAY_KEYS[new Date(Date.now() + 3 * 3600_000).getUTCDay()]}).
+${(rs.floors_count ?? 1) > 1 ? `This restaurant has ${rs.floors_count} floors — ask once which floor they prefer (1-${rs.floors_count}) and pass floor.` : "Do NOT ask about floors."}
+${rs.has_indoor && rs.has_outdoor ? "Ask once: indoor or outdoor seating? Pass seating_area." : "Do NOT ask about indoor/outdoor seating."}
+For reservations: collect guest_name, party_size, starts_at, and ALWAYS ask once for special requests (birthday, high chair, allergies). Put those into notes.
+Pass starts_at as Beirut local time "YYYY-MM-DDTHH:mm" (e.g. 9 pm on 26 September → "2026-09-26T21:00"). You MUST call create_reservation once you have name, party size, date and time — never say the booking is confirmed without it, and never hand off a normal reservation.
 If party_size > max party size above → call handover_to_human with reason "large_group" instead of create_reservation.
 
 STEP 6 — HANDOFF
@@ -213,6 +218,8 @@ const TOOLS = [
           party_size: { type: "number" },
           starts_at: { type: "string", description: "ISO 8601 timestamp" },
           notes: { type: "string", description: "Special requests: birthday, high chair, allergies, etc." },
+          floor: { type: "number", description: "Preferred floor number (only if the restaurant has multiple floors)" },
+          seating_area: { type: "string", enum: ["indoor", "outdoor"], description: "Only if the restaurant has both indoor and outdoor" },
         },
         required: ["guest_name", "party_size", "starts_at"],
         additionalProperties: false,
@@ -324,25 +331,44 @@ async function execTool(name: string, args: any, ctx: any): Promise<string> {
     if (args.party_size > (rs.max_party_size ?? 10)) {
       return `Party of ${args.party_size} exceeds the max (${rs.max_party_size}). Call handover_to_human with reason "large_group" instead.`;
     }
-    const hoursCheck = isWithinOpeningHours(rs.opening_hours, args.starts_at);
+    // Interpret times without an explicit offset as Beirut local time.
+    let iso = String(args.starts_at || "");
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(iso)) iso = iso + (iso.length === 16 ? ":00" : "") + "+03:00";
+    const startsAt = new Date(iso);
+    if (isNaN(startsAt.getTime())) return `Invalid date. Ask the customer to confirm the date and time.`;
+    if (startsAt.getTime() < Date.now()) return `That time is in the past. Ask the customer for a future date/time.`;
+    const hoursCheck = isWithinOpeningHours(rs.opening_hours, startsAt.toISOString());
     if (!hoursCheck.ok) {
       return `Requested time is outside opening hours (${hoursCheck.reason}). Politely propose another time within hours, do not create.`;
     }
-    const startsAt = new Date(args.starts_at);
+    const endsAt = new Date(startsAt.getTime() + 90 * 60_000);
+    const wantFloor = (rs.floors_count ?? 1) > 1 && args.floor ? Number(args.floor) : null;
+    const wantArea = rs.has_indoor && rs.has_outdoor && args.seating_area ? String(args.seating_area).toLowerCase() : (rs.has_outdoor && !rs.has_indoor ? "outdoor" : rs.has_indoor && !rs.has_outdoor ? "indoor" : null);
+    const { data: tbls } = await supabase.from("restaurant_tables").select("id,seats,floor,seating_area").eq("tenant_id", tenantId);
+    const bySize = (list: any[]) => list.filter((t: any) => t.seats >= args.party_size).sort((a: any, b: any) => a.seats - b.seats)[0];
+    const matching = (tbls || []).filter((t: any) =>
+      (wantFloor == null || t.floor == null || t.floor === wantFloor) &&
+      (wantArea == null || !t.seating_area || t.seating_area === wantArea));
+    const fit = bySize(matching) ?? bySize(tbls || []);
     const reminderAt = new Date(startsAt.getTime() - (rs.reminder_hours_before ?? 2) * 60 * 60 * 1000);
     const { data, error } = await supabase.from("reservations").insert({
       tenant_id: tenantId,
       contact_id: contact.id,
+      table_id: fit?.id ?? tbls?.[0]?.id ?? null,
       guest_name: args.guest_name,
       guest_phone: args.guest_phone || phoneNumber,
       party_size: args.party_size,
-      starts_at: args.starts_at,
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+      floor: wantFloor,
+      seating_area: wantArea,
       notes: args.notes ?? null,
       reminder_at: reminderAt.toISOString(),
       status: "confirmed",
       source: "ai",
     }).select().single();
-    if (error) return `Failed: ${error.message}`;
+    if (error) { console.error("create_reservation failed", error); return `Failed: ${error.message}`; }
+
     return `Reservation booked for ${args.guest_name}, party of ${args.party_size}, at ${args.starts_at}.`;
   }
 
@@ -393,6 +419,13 @@ async function execTool(name: string, args: any, ctx: any): Promise<string> {
       qty: i.qty,
       unit_price: i.unit_price,
     })));
+
+    const { mirrorBillToOrders } = await import("./restaurant-flow.ts");
+    const mirroredId = await mirrorBillToOrders(supabase, {
+      tenantId, contactId: contact.id, customerName: args.customer_name ?? null, phone: args.customer_phone || phoneNumber,
+      orderType: args.order_type ?? null, address: args.delivery_address ?? null, deliveryFee, total, items: itemsResolved,
+    });
+    if (mirroredId && !bill.display_id) bill.display_id = mirroredId;
 
     // Notify kitchen if configured
     if (rs.kitchen_notify_phone) {

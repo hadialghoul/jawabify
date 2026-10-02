@@ -5,7 +5,6 @@ import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
-const INSTAGRAM_GRAPH_VERSION = 'v25.0';
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
@@ -57,7 +56,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Instagram is not connected for this account' }, 400);
     }
 
-    const senderId = cred.ig_account_id || cred.page_id;
+    const senderId = cred.page_id || cred.ig_account_id;
     const mediaType = typeof body?.mediaType === 'string' ? body.mediaType.split(';')[0] : '';
     const attachmentType = mediaType.startsWith('image/')
       ? 'image'
@@ -72,7 +71,7 @@ Deno.serve(async (req) => {
 
 
     const res = await fetch(
-      `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/${senderId}/messages?access_token=${encodeURIComponent(cred.access_token)}`,
+      `https://graph.facebook.com/v21.0/${senderId}/messages?access_token=${encodeURIComponent(cred.access_token)}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
     );
     const result = await res.json().catch(() => ({}));

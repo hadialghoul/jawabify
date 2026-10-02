@@ -8,10 +8,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { TemplateManager } from '@/components/settings/TemplateManager';
 import { Contact } from '@/types/chat';
 import { toast } from 'sonner';
-import { Megaphone, Send, Loader2, Users, FileText, RefreshCw, Plus, CheckCheck, Check, Eye, MessageSquare, X, Link2, Copy, ShoppingBag, Pause, Play, Clock, Gauge, AlertTriangle } from 'lucide-react';
+import { Megaphone, Send, Loader2, Users, FileText, RefreshCw, Plus, CheckCheck, Check, Eye, MessageSquare, X, Link2, Copy, ShoppingBag, Pause, Play, Clock, Gauge, AlertTriangle, ChevronsUpDown, Star, MessageCircleQuestion, ListFilter, Trash2 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { actingHeaders } from '@/lib/actingTenant';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,7 +48,14 @@ interface Campaign {
   auto_paused: boolean | null;
 }
 
-export function CampaignsTab({ contacts: rawContacts }: { contacts: Contact[] }) {
+const LEAD_STATUS_TAGS = [
+  { value: 'new', label: 'New' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow up' },
+  { value: 'not_interested', label: 'Not interested' },
+];
+
+export function CampaignsTab({ contacts: rawContacts, launch }: { contacts: Contact[]; launch?: { audience: 'interested' | 'no_order'; key: number } | null }) {
   const contacts = useMemo(() => rawContacts.filter((c) => c.platform === 'whatsapp' || !c.platform), [rawContacts]);
   const [tab, setTab] = useState<'campaigns' | 'templates'>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -55,6 +64,7 @@ export function CampaignsTab({ contacts: rawContacts }: { contacts: Contact[] })
   const [showCreate, setShowCreate] = useState(false);
   const [detailCampaign, setDetailCampaign] = useState<Campaign | null>(null);
   const { tenantId } = useAuth();
+  useEffect(() => { if (launch) { setTab('campaigns'); setShowCreate(true); } }, [launch?.key]);
 
   const loadCampaigns = async () => {
     if (!tenantId) {
@@ -67,7 +77,18 @@ export function CampaignsTab({ contacts: rawContacts }: { contacts: Contact[] })
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(50);
-    setCampaigns((data as Campaign[]) || []);
+    const list = (data as Campaign[]) || [];
+    if (list.length) {
+      const { data: counts } = await supabase.rpc('get_campaign_real_counts', { p_campaign_ids: list.map((c) => c.id) });
+      const byId = new Map((counts || []).map((r: any) => [r.campaign_id, r]));
+      for (const c of list) {
+        const r: any = byId.get(c.id);
+        if (!r) continue;
+        c.total_recipients = r.total; c.sent_count = r.sent; c.delivered_count = r.delivered;
+        c.read_count = r.read; c.replied_count = r.replied; c.failed_count = r.failed;
+      }
+    }
+    setCampaigns(list);
   };
 
   const loadTemplates = async () => {
@@ -159,7 +180,7 @@ export function CampaignsTab({ contacts: rawContacts }: { contacts: Contact[] })
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {campaigns.map(c => <CampaignCard key={c.id} campaign={c} onClick={() => setDetailCampaign(c)} />)}
+                  {campaigns.map(c => <CampaignCard key={c.id} campaign={c} onClick={() => setDetailCampaign(c)} onDeleted={() => setCampaigns(prev => prev.filter(x => x.id !== c.id))} />)}
                 </div>
               )}
             </div>
@@ -179,12 +200,14 @@ export function CampaignsTab({ contacts: rawContacts }: { contacts: Contact[] })
         contacts={contacts}
         pastCampaigns={campaigns}
         onCreated={loadCampaigns}
+        initialAudience={launch?.audience}
+        launchKey={launch?.key}
       />
     </div>
   );
 }
 
-function CampaignCard({ campaign, onClick }: { campaign: Campaign; onClick: () => void }) {
+function CampaignCard({ campaign, onClick, onDeleted }: { campaign: Campaign; onClick: () => void; onDeleted: () => void }) {
   const total = campaign.total_recipients || 1;
   const done = campaign.sent_count + campaign.failed_count;
   const pct = Math.round((done / total) * 100);
@@ -206,6 +229,14 @@ function CampaignCard({ campaign, onClick }: { campaign: Campaign; onClick: () =
     const { error } = await supabase.from('campaigns').update(updates).eq('id', campaign.id);
     if (error) toast.error(error.message);
     else toast.success(isPaused ? 'Campaign resumed' : 'Campaign paused');
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete campaign "${campaign.name}"? This cannot be undone.`)) return;
+    const { error } = await supabase.from('campaigns').delete().eq('id', campaign.id);
+    if (error) toast.error(error.message);
+    else { toast.success('Campaign deleted'); onDeleted(); }
   };
 
   const canPause = ['sending', 'scheduled'].includes(campaign.status);
@@ -250,6 +281,9 @@ function CampaignCard({ campaign, onClick }: { campaign: Campaign; onClick: () =
                 {canResume ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
               </Button>
             )}
+            <Button size="icon" variant="ghost" className="h-11 w-11 sm:h-7 sm:w-7 text-destructive" onClick={handleDelete} title="Delete campaign" aria-label="Delete campaign">
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
         {campaign.status === 'paused' && campaign.paused_reason && (
@@ -485,8 +519,10 @@ function MetricCard({ icon, label, value, pct, tone }: { icon: React.ReactNode; 
 }
 
 function CreateCampaignDialog({
-  open, onOpenChange, templates, contacts, pastCampaigns, onCreated,
+  open, onOpenChange, templates, contacts, pastCampaigns, onCreated, initialAudience, launchKey,
 }: {
+  initialAudience?: 'interested' | 'no_order';
+  launchKey?: number;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   templates: Template[];
@@ -504,6 +540,7 @@ function CreateCampaignDialog({
   const [remoteMatches, setRemoteMatches] = useState<Contact[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [selectedLeadStatuses, setSelectedLeadStatuses] = useState<Set<string>>(new Set());
   const [excludeCampaignIds, setExcludeCampaignIds] = useState<Set<string>>(new Set());
   const [excludeOnlyOrderers, setExcludeOnlyOrderers] = useState(false);
   const [excludedContactIds, setExcludedContactIds] = useState<Set<string>>(new Set());
@@ -516,6 +553,40 @@ function CreateCampaignDialog({
   const [excludeOptedOut, setExcludeOptedOut] = useState<boolean>(true);
   const [appendOptOut, setAppendOptOut] = useState<boolean>(true);
   const [optOutVariableIndex, setOptOutVariableIndex] = useState<string>('');
+  const [tagOpen, setTagOpen] = useState(false);
+  const [audienceOpen, setAudienceOpen] = useState(false);
+  const [audience, setAudience] = useState<'all' | 'interested' | 'no_order'>('all');
+  const [orderedContactIds, setOrderedContactIds] = useState<Set<string>>(new Set());
+  const [orderedPhones, setOrderedPhones] = useState<Set<string>>(new Set());
+  const [loadingOrdered, setLoadingOrdered] = useState(false);
+  useEffect(() => { if (open && initialAudience && launchKey) setAudience(initialAudience); }, [open, launchKey]);
+
+  // Who already placed an order — used by the "asked but never ordered" audience.
+  useEffect(() => {
+    if (!open || !tenantId) return;
+    let cancelled = false;
+    setLoadingOrdered(true);
+    (async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select('contact_id, customer_phone')
+        .eq('tenant_id', tenantId)
+        .limit(10000);
+      if (cancelled) return;
+      const ids = new Set<string>();
+      const phones = new Set<string>();
+      (data || []).forEach((o: any) => {
+        if (o.contact_id) ids.add(o.contact_id);
+        const d = String(o.customer_phone || '').replace(/\D/g, '');
+        if (d.length >= 7) phones.add(d.slice(-8));
+      });
+      setOrderedContactIds(ids);
+      setOrderedPhones(phones);
+      setLoadingOrdered(false);
+    })();
+    return () => { cancelled = true; };
+  }, [open, tenantId]);
+
 
   // Auto-compute send rate when spread is set.
   useEffect(() => {
@@ -621,6 +692,12 @@ function CreateCampaignDialog({
     return Array.from(s).sort();
   }, [contacts]);
 
+  const toggleLeadStatus = (v: string) => {
+    const next = new Set(selectedLeadStatuses);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    setSelectedLeadStatuses(next);
+  };
+
   // Search the whole address book on the server, not just the contacts that
   // happen to be loaded in the paginated list.
   useEffect(() => {
@@ -638,7 +715,7 @@ function CreateCampaignDialog({
       if (digits.length >= 3) filters.push(`phone_number.ilike.%${digits}%`);
       const { data, error } = await supabase
         .from('contacts')
-        .select('id, name, phone_number, tags, opted_out, platform, handle, updated_at')
+        .select('id, name, phone_number, tags, lead_status, opted_out, platform, handle, updated_at')
         .eq('tenant_id', tenantId)
         .or(filters.join(','))
         .order('updated_at', { ascending: false })
@@ -654,6 +731,7 @@ function CreateCampaignDialog({
             name: c.name || c.phone_number,
             phoneNumber: c.phone_number,
             tags: c.tags || [],
+            leadStatus: c.lead_status || 'new',
             optedOut: !!c.opted_out,
             platform: c.platform || 'whatsapp',
             handle: c.handle || undefined,
@@ -694,13 +772,22 @@ function CreateCampaignDialog({
     return searchPool.filter(c => {
       if (excludedContactIds.has(c.id)) return false;
       if (excludeOptedOut && c.optedOut) return false;
+      if (audience === 'interested' && !c.isInterested) return false;
+      if (audience === 'no_order') {
+        const d = (c.phoneNumber || '').replace(/\D/g, '');
+        if (orderedContactIds.has(c.id)) return false;
+        if (d.length >= 7 && orderedPhones.has(d.slice(-8))) return false;
+      }
       if (selectedTags.size > 0) {
         const tags = c.tags || [];
         if (!tags.some(t => selectedTags.has(t))) return false;
       }
+      if (selectedLeadStatuses.size > 0) {
+        if (!selectedLeadStatuses.has((c as any).leadStatus || 'new')) return false;
+      }
       return matches(c, s, digits);
     });
-  }, [searchPool, search, selectedTags, excludedContactIds, excludeOptedOut]);
+  }, [searchPool, search, selectedTags, selectedLeadStatuses, excludedContactIds, excludeOptedOut, audience, orderedContactIds, orderedPhones]);
 
   // Contacts that match the search but are hidden only because they unsubscribed
   const hiddenOptedOutMatches = useMemo(() => {
@@ -739,14 +826,15 @@ function CreateCampaignDialog({
     setExcludeCampaignIds(new Set()); setExcludedContactIds(new Set());
     setExcludeOnlyOrderers(false);
     setExcludeOptedOut(true);
+    setSelectedLeadStatuses(new Set());
     setAppendOptOut(true);
-    setOptOutVariableIndex('');
+    setOptOutVariableIndex(''); setAudience('all'); setTagOpen(false); setAudienceOpen(false);
     setScheduledAt(''); setSendRate(60); setConcurrency(5); setSpreadHours('');
   };
 
 
   const handleSend = async () => {
-    const selectedContacts = contacts.filter((c) => selectedIds.has(c.id));
+    const selectedContacts = searchPool.filter((c) => selectedIds.has(c.id));
     if (!name.trim() || !templateName || selectedContacts.length === 0) {
       toast.error('Name, template, and at least one contact required');
       return;
@@ -818,8 +906,13 @@ function CreateCampaignDialog({
         <div className="flex-1 overflow-y-auto space-y-4 pr-1">
           <div className="space-y-1.5">
             <Label className="text-xs">Campaign name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="May promo blast" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Summer promo"
+            />
           </div>
+
 
           <div className="space-y-1.5">
             <Label className="text-xs">Template</Label>
@@ -1083,30 +1176,149 @@ function CreateCampaignDialog({
               onChange={(e) => setSearch(e.target.value)}
               className="text-sm"
             />
-            {allTags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                <span className="text-[11px] text-muted-foreground self-center mr-1">Filter by tag:</span>
-                {allTags.map(t => (
-                  <Badge
-                    key={t}
-                    variant={selectedTags.has(t) ? 'default' : 'outline'}
-                    className="cursor-pointer text-[10px]"
-                    onClick={() => toggleTag(t)}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground mr-1">Audience:</span>
+              <Popover open={audienceOpen} onOpenChange={setAudienceOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    role="combobox"
+                    aria-expanded={audienceOpen}
+                    className="h-7 text-[11px] px-2 font-normal"
                   >
-                    {t}
-                  </Badge>
-                ))}
-                {selectedTags.size > 0 && (
-                  <Badge
-                    variant="secondary"
-                    className="cursor-pointer text-[10px] text-muted-foreground"
-                    onClick={() => setSelectedTags(new Set())}
-                  >
-                    Clear
-                  </Badge>
+                    {audience === 'all' ? <Users className="h-3 w-3 mr-1" /> : audience === 'interested' ? <Star className="h-3 w-3 mr-1" /> : <MessageCircleQuestion className="h-3 w-3 mr-1" />}
+                    {audience === 'all' ? 'Everyone' : audience === 'interested' ? 'Interested' : 'Asked but never ordered'}
+                    <ChevronsUpDown className="h-3 w-3 ml-1 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search audience…" />
+                    <CommandList>
+                      <CommandEmpty>No matching audience</CommandEmpty>
+                      <CommandGroup>
+                        {([
+                          { key: 'all', label: 'Everyone', icon: Users },
+                          { key: 'interested', label: 'Interested', icon: Star },
+                          { key: 'no_order', label: 'Asked but never ordered', icon: MessageCircleQuestion },
+                        ] as const).map(({ key, label, icon: Icon }) => (
+                          <CommandItem
+                            key={key}
+                            value={label}
+                            onSelect={() => { setAudience(key); setSelectedIds(new Set()); setAudienceOpen(false); }}
+                          >
+                            <Check className={`h-3.5 w-3.5 mr-1.5 ${audience === key ? 'opacity-100' : 'opacity-0'}`} />
+                            <Icon className="h-3.5 w-3.5 mr-1.5" /> {label}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              {audience === 'no_order' && loadingOrdered && (
+                <span className="text-[11px] text-muted-foreground">Loading orders…</span>
+              )}
+            </div>
+            {audience !== 'all' && (
+              <p className="text-[11px] text-muted-foreground">
+                {filteredContacts.length} contact{filteredContacts.length === 1 ? '' : 's'} match this audience
+                {audience === 'no_order' ? ' (messaged you, no order on record)' : ' (flagged as interested)'}.
+              </p>
+            )}
+            {contacts.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Popover open={tagOpen} onOpenChange={setTagOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      role="combobox"
+                      aria-expanded={tagOpen}
+                      className="h-7 text-[11px] px-2 font-normal"
+                    >
+                      <ListFilter className="h-3 w-3 mr-1" />
+                      Filter by tag{(selectedTags.size + selectedLeadStatuses.size) > 0 ? ` (${selectedTags.size + selectedLeadStatuses.size})` : ''}
+                      <ChevronsUpDown className="h-3 w-3 ml-1 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search tags…" />
+                      <CommandList className="max-h-60">
+                        <CommandEmpty>No matching tag</CommandEmpty>
+                        <CommandGroup>
+                          {allTags.map(t => (
+                            <CommandItem
+                              key={t}
+                              value={t}
+                              onSelect={() => toggleTag(t)}
+                            >
+                              <Check
+                                className={`h-3.5 w-3.5 mr-1 shrink-0 ${selectedTags.has(t) ? 'opacity-100' : 'opacity-0'}`}
+                              />
+                              <span className="truncate text-xs">{t}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                        <CommandGroup heading="Lead status">
+                          {LEAD_STATUS_TAGS.map(t => (
+                            <CommandItem
+                              key={t.value}
+                              value={t.label}
+                              onSelect={() => toggleLeadStatus(t.value)}
+                            >
+                              <Check
+                                className={`h-3.5 w-3.5 mr-1 shrink-0 ${selectedLeadStatuses.has(t.value) ? 'opacity-100' : 'opacity-0'}`}
+                              />
+                              <span className="truncate text-xs">{t.label}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {(selectedTags.size > 0 || selectedLeadStatuses.size > 0) && (
+                  <>
+                    {[...selectedTags].map(t => (
+                      <Badge
+                        key={t}
+                        variant="default"
+                        className="cursor-pointer text-[10px]"
+                        onClick={() => toggleTag(t)}
+                      >
+                        {t} <X className="h-3 w-3 ml-0.5" />
+                      </Badge>
+                    ))}
+                    {[...selectedLeadStatuses].map(v => {
+                      const lt = LEAD_STATUS_TAGS.find(x => x.value === v);
+                      return (
+                        <Badge
+                          key={v}
+                          variant="default"
+                          className="cursor-pointer text-[10px]"
+                          onClick={() => toggleLeadStatus(v)}
+                        >
+                          {lt?.label || v} <X className="h-3 w-3 ml-0.5" />
+                        </Badge>
+                      );
+                    })}
+                    <Badge
+                      variant="secondary"
+                      className="cursor-pointer text-[10px] text-muted-foreground"
+                      onClick={() => { setSelectedTags(new Set()); setSelectedLeadStatuses(new Set()); }}
+                    >
+                      Clear
+                    </Badge>
+                  </>
                 )}
               </div>
             )}
+
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground mr-1">Quick pick:</span>
               {[250, 350, 500, 700, 1000].map(n => (

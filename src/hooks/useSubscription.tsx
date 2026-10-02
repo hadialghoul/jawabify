@@ -39,6 +39,10 @@ export function useSubscription(userId: string | undefined, tenantId?: string | 
 
     let cancelled = false;
     const fetchSub = async () => {
+      // Keep the gate "loading" while re-checking (e.g. tenantId just resolved),
+      // otherwise admins added to someone else's workspace get bounced to the
+      // subscribe page before the workspace-level check completes.
+      setLoading(true);
       // Fetch recent subscription rows across providers/environments and prefer an
       // active one. Environment (Stripe test vs live) must not gate access — the
       // preview build uses test keys while real customers are billed live.

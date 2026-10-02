@@ -1,0 +1,1 @@
+ALTER TABLE public.restaurant_tables ADD COLUMN IF NOT EXISTS floor integer, ADD COLUMN IF NOT EXISTS seating_area text;

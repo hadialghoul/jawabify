@@ -15,6 +15,9 @@ export type RestaurantSettings = {
   reminder_hours_before: number;
   kitchen_notify_phone: string | null;
   human_transfer_phone: string | null;
+  floors_count?: number;
+  has_indoor?: boolean;
+  has_outdoor?: boolean;
 };
 
 const DEFAULT_HOURS: OpeningHours = {

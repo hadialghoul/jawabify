@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Loader2, Send, MessageSquare, Sparkles, BookOpen, Save, Languages, Upload, Search, Plus, Trash2, Paperclip, Image as ImageIcon, FileText } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, MessageSquare, Sparkles, BookOpen, Save, Languages, Upload, Search, Plus, Trash2, Paperclip, Image as ImageIcon, FileText, Tag } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ChannelBadge } from '@/components/chat/ChannelBadge';
 import { ImportContactsDialog } from '@/components/crm/ImportContactsDialog';
@@ -27,7 +27,17 @@ import { enqueueSend, mediaStoragePath, withRetry } from '@/lib/sendQueue';
 
 
 interface Tenant { id: string; name: string; ai_replies_enabled: boolean }
-interface ContactRow { id: string; name: string | null; phone_number: string; updated_at: string | null; platform: ChannelPlatform | null; handle?: string | null; unread_count?: number }
+interface ContactRow { id: string; name: string | null; phone_number: string; updated_at: string | null; platform: ChannelPlatform | null; handle?: string | null; unread_count?: number; lead_status?: LeadStatus }
+
+const LEAD_TAGS = [
+  { value: 'new', label: 'New' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow up' },
+  { value: 'not_interested', label: 'Not interested' },
+] as const;
+
+type LeadStatus = typeof LEAD_TAGS[number]['value'];
+const getLeadStatus = (contact?: ContactRow | null): LeadStatus => contact?.lead_status || 'new';
 
 const contactSubtitle = (c: { phone_number: string; handle?: string | null; platform: ChannelPlatform | null }) =>
   (c.platform === 'instagram' || c.phone_number?.startsWith('ig:'))
@@ -293,7 +303,7 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
 
 
   const loadContacts = async () => {
-    const { data } = await supabase.from('contacts').select('id,name,phone_number,updated_at,platform,handle')
+    const { data } = await supabase.from('contacts').select('id,name,phone_number,updated_at,platform,handle,lead_status')
       .eq('tenant_id', tenantId).order('updated_at', { ascending: false }).limit(200);
     const rows = (data as ContactRow[]) || [];
 
@@ -313,7 +323,7 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
     const extra: ContactRow[] = [];
     for (let i = 0; i < missing.length; i += 200) {
       const { data: more } = await supabase.from('contacts')
-        .select('id,name,phone_number,updated_at,platform,handle')
+        .select('id,name,phone_number,updated_at,platform,handle,lead_status')
         .in('id', missing.slice(i, i + 200));
       extra.push(...((more as ContactRow[]) || []));
     }
@@ -340,6 +350,20 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
     setOpenedRow(contact);
     setSelected(contact.id);
     markAsRead(contact.id);
+  };
+
+  const setLeadStatus = async (contact: ContactRow, leadStatus: LeadStatus) => {
+    const previousStatus = getLeadStatus(contact);
+    setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, lead_status: leadStatus } : item));
+    setRemoteResults((current) => current.map((item) => item.id === contact.id ? { ...item, lead_status: leadStatus } : item));
+    setOpenedRow((current) => current?.id === contact.id ? { ...current, lead_status: leadStatus } : current);
+    const { error } = await supabase.from('contacts').update({ lead_status: leadStatus }).eq('id', contact.id).eq('tenant_id', tenantId);
+    if (error) {
+      setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, lead_status: previousStatus } : item));
+      setRemoteResults((current) => current.map((item) => item.id === contact.id ? { ...item, lead_status: previousStatus } : item));
+      setOpenedRow((current) => current?.id === contact.id ? { ...current, lead_status: previousStatus } : current);
+      toast({ title: 'Could not update tag', description: error.message, variant: 'destructive' });
+    }
   };
 
   const loadMessages = async (contactId: string) => {
@@ -398,13 +422,13 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
 
     let id = existing?.id;
     if (!id) {
-      const { data, error } = await supabase.from('contacts').insert({ tenant_id: tenantId, phone_number: phone, name: phone, ai_enabled: false }).select('id').single();
+      const { data, error } = await supabase.from('contacts').insert({ tenant_id: tenantId, phone_number: phone, name: phone, ai_enabled: false, lead_status: 'new' }).select('id').single();
       if (error) { toast({ title: 'Could not add contact', description: error.message, variant: 'destructive' }); return; }
       id = data.id;
     }
     setNewTo(""); setSearch("");
     await loadContacts();
-    setSelected(id!);
+    if (id) setSelected(id);
   };
 
   const addContact = async () => {
@@ -422,7 +446,8 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
       name: sanitizeText(addName) || phone,
       ai_enabled: false,
       platform: 'whatsapp',
-    }).select('id,name,phone_number,updated_at,platform,handle').single();
+      lead_status: 'new',
+    }).select('id,name,phone_number,updated_at,platform,handle,lead_status').single();
     setAdding(false);
     if (error) {
       toast({ title: 'Could not add contact', description: error.message, variant: 'destructive' });
@@ -489,7 +514,7 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
       const filters = [`name.ilike.%${raw}%`, `handle.ilike.%${raw}%`];
       if (digits) filters.push(`phone_number.ilike.%${digits}%`);
       const { data } = await supabase.from('contacts')
-        .select('id,name,phone_number,updated_at,platform,handle')
+        .select('id,name,phone_number,updated_at,platform,handle,lead_status')
         .eq('tenant_id', tenantId).or(filters.join(','))
         .order('updated_at', { ascending: false }).limit(50);
       if (!cancelled) {
@@ -703,22 +728,61 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
             )}
             {visibleContacts.map((c) => {
               const unread = (c.unread_count ?? 0) > 0;
+              const leadTag = LEAD_TAGS.find((tag) => tag.value === getLeadStatus(c));
               return (
-                <button key={c.id} onClick={() => openContact(c)}
-                  className={`min-h-14 w-full border-b px-3 py-2 text-left hover:bg-muted/50 ${selected === c.id ? 'bg-muted' : ''}`}>
-                  <div className="flex items-center gap-1.5">
-                    <ChannelBadge platform={(c.platform as ChannelPlatform) || 'whatsapp'} compact />
-                    <div className={`text-sm truncate ${unread ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'}`}>
-                      {c.name || contactSubtitle(c)}
+                <div key={c.id} className={`flex min-h-16 items-stretch border-b hover:bg-muted/50 ${selected === c.id ? 'bg-muted' : ''}`}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => openContact(c)}
+                    className="h-auto min-w-0 flex-1 justify-start rounded-none px-3 py-2 text-left hover:bg-transparent"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <ChannelBadge platform={(c.platform as ChannelPlatform) || 'whatsapp'} compact />
+                        <div className={`truncate text-sm ${unread ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'}`}>
+                          {c.name || contactSubtitle(c)}
+                        </div>
+                        {unread && (
+                          <span className="ml-auto flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground shadow-sm shadow-primary/40">
+                            {c.unread_count}
+                          </span>
+                        )}
+                      </div>
+                      <div className="truncate text-xs font-normal text-muted-foreground">{contactSubtitle(c)}</div>
+                      <div className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary">
+                        <Tag className="h-3 w-3" />
+                        {leadTag?.label}
+                      </div>
                     </div>
-                    {unread && (
-                      <span className="ml-auto flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground shadow-sm shadow-primary/40">
-                        {c.unread_count}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground truncate">{contactSubtitle(c)}</div>
-                </button>
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="my-auto mr-2 h-10 w-10 shrink-0 border border-border bg-background text-primary shadow-sm hover:bg-accent"
+                        aria-label={`Mark ${c.name || contactSubtitle(c)} lead status`}
+                        title="Change lead tag"
+                      >
+                        <Tag className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-popover">
+                      {LEAD_TAGS.map((tag) => (
+                        <DropdownMenuItem
+                          key={tag.value}
+                          className="cursor-pointer"
+                          onSelect={() => setLeadStatus(c, tag.value)}
+                        >
+                          <Tag className={`mr-2 h-4 w-4 ${tag.value === getLeadStatus(c) ? 'text-primary' : 'text-muted-foreground'}`} />
+                          <span className={tag.value === getLeadStatus(c) ? 'font-semibold text-primary' : ''}>{tag.label}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               );
             })}
           </div>
@@ -752,6 +816,17 @@ function MessagesInbox({ tenantId }: { tenantId: string }) {
                   </Button>
                 </div>
                 <div className="text-xs text-muted-foreground">{contactSubtitle(selectedContact)}</div>
+                 <div className="mt-2 flex items-center gap-2">
+                   <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                   <Select value={getLeadStatus(selectedContact)} onValueChange={(value) => setLeadStatus(selectedContact, value as LeadStatus)}>
+                     <SelectTrigger className="h-9 w-[160px]" aria-label="Lead tag">
+                       <SelectValue />
+                     </SelectTrigger>
+                     <SelectContent>
+                       {LEAD_TAGS.map((tag) => <SelectItem key={tag.value} value={tag.value}>{tag.label}</SelectItem>)}
+                     </SelectContent>
+                   </Select>
+                 </div>
               </div>
               <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2 md:max-h-[420px] md:p-4">
                 {(messages[selectedContact.id] || []).map((m) => (

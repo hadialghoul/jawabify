@@ -1,3 +1,4 @@
+import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
 // Wellness vertical flow — isolated from ecommerce/restaurant/real_estate.
 // Invoked only when tenant.vertical === 'wellness'. Writes only to wellness_*
 // tables (each guarded by guard_wellness_only trigger).
@@ -334,7 +335,8 @@ export async function runWellnessFlow(opts: {
     tenantPhoneNumberId, tenantAccessToken, conversationHistory: history,
     lastSession: null, flowStarted: false,
   };
-  let messages: any[] = [{ role: "system", content: systemPrompt }, ...history];
+  const __payLink = await getOnlinePaymentLink(supabase, tenantId).catch(() => null);
+  let messages: any[] = [{ role: "system", content: systemPrompt + onlinePaymentPrompt(__payLink) }, ...history];
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {

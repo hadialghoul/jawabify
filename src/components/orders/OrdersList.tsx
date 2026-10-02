@@ -88,7 +88,7 @@ export function OrdersList({ orders, onUpdateStatus, onDeleteOrder }: OrdersList
                     delivery_fee: order.deliveryFee,
                     currency: 'USD',
                     total: (order.totalPrice ?? 0) + (order.deliveryFee ?? 0),
-                    items: [{ id: order.id, name: (order.productName ?? '').replace(/^\s*\d+\s*[×x]\s*/i, ''), qty: order.quantity, unit_price: order.totalPrice ?? 0 }],
+                    items: [{ id: order.id, name: (order.productName ?? '').replace(/^\s*\d+\s*[×x]\s*/i, ''), qty: order.quantity, unit_price: (order.totalPrice ?? 0) / Math.max(1, order.quantity || 1) }],
                   })}
                 >
                   <Printer className="h-3.5 w-3.5" />

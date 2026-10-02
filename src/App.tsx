@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { isEmbeddedShopify, readShopFromUrl, withShop } from "@/lib/shopifyEmbedded";
+import { isAppHost, isMarketingPath, isMarketingHost, isProductPath, MARKETING_ORIGIN, APP_ORIGIN } from "@/lib/appHost";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ThemeProvider } from "next-themes";
@@ -48,6 +49,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(factory: () => Promis
 }
 
 const Index = lazyWithRetry(() => import("./pages/Index"));
+const ShopifyEmbeddedApp = lazyWithRetry(() => import("./pages/ShopifyEmbeddedApp"));
 const Features = lazyWithRetry(() => import("./pages/marketing/Features"));
 const HowItWorks = lazyWithRetry(() => import("./pages/marketing/HowItWorks"));
 const Industries = lazyWithRetry(() => import("./pages/marketing/Industries"));
@@ -58,6 +60,7 @@ const Contact = lazyWithRetry(() => import("./pages/marketing/Contact"));
 const WhatsAppApiGuide = lazyWithRetry(() => import("./pages/marketing/WhatsAppApiGuide"));
 const WhatsAppPricingGuide = lazyWithRetry(() => import("./pages/marketing/WhatsAppPricingGuide"));
 const Info = lazyWithRetry(() => import("./pages/Info"));
+const GoogleCalendarReturn = lazyWithRetry(() => import("./pages/oauth/GoogleCalendarReturn"));
 const Settings = lazyWithRetry(() => import("./pages/Settings"));
 const Integrations = lazyWithRetry(() => import("./pages/Integrations"));
 const Account = lazyWithRetry(() => import("./pages/Account"));
@@ -94,6 +97,28 @@ const RouteFallback = () => (
 
 const APP_HISTORY_LOCK_KEY = 'jawabify_app_history_locked';
 
+/**
+ * On app.jawabify.com the landing page never renders: "/" goes straight to the
+ * product, and marketing pages bounce to the marketing domain.
+ */
+const AppHostLock = () => {
+  const location = useLocation();
+  if (isAppHost()) {
+    if (isMarketingPath(location.pathname)) {
+      window.location.replace(`${MARKETING_ORIGIN}${location.pathname}${location.search}`);
+    }
+    return null;
+  }
+  // On jawabify.com the product lives on the app subdomain.
+  if (isMarketingHost() && isProductPath(location.pathname)) {
+    window.location.replace(
+      `${APP_ORIGIN}${location.pathname}${location.search}${location.hash}`,
+    );
+  }
+  return null;
+};
+
+
 const RootRoute = () => {
   const { user, tenantId, isSuperAdmin, loading } = useAuth();
   const navigate = useNavigate();
@@ -112,6 +137,14 @@ const RootRoute = () => {
       navigate(`/auth/callback${search}${hash}`, { replace: true });
       return;
     }
+    // On the app subdomain "/" is the product, never the landing page.
+    if (isAppHost()) {
+      if (!user) navigate('/auth', { replace: true });
+      else if (isSuperAdmin) navigate('/super-admin', { replace: true });
+      else if (tenantId) navigate('/app', { replace: true });
+      else navigate('/onboarding', { replace: true });
+      return;
+    }
     if (!user) return;
     // Only auto-redirect authenticated users into the app on tabs that entered
     // the authenticated app flow. Fresh tabs opened to "/" should render the
@@ -122,6 +155,7 @@ const RootRoute = () => {
     else if (tenantId) navigate('/app', { replace: true });
     else navigate('/onboarding', { replace: true });
   }, [user, tenantId, isSuperAdmin, loading, navigate]);
+  if (isAppHost()) return <RouteFallback />;
   return <Home />;
 };
 
@@ -135,7 +169,9 @@ const RootRoute = () => {
  * off-platform checkout. Detection is URL/frame based — nothing is persisted, so
  * this works with third-party cookies and storage blocked.
  */
-const EMBEDDED_ALLOWED_PATHS = ['/shopify/connect', '/privacy', '/terms'];
+// '/app' and '/settings' are allowed so the new embedded app can show the
+// dashboard in the Admin; billing UI there is hidden when embedded.
+const EMBEDDED_ALLOWED_PATHS = ['/shopify/connect', '/shopify/app', '/app', '/settings', '/privacy', '/terms'];
 
 const EmbeddedShopifyLock = () => {
   const location = useLocation();
@@ -176,6 +212,7 @@ const AppRoutes = () => {
     <Suspense fallback={<RouteFallback />}>
       <ScrollLockGuard />
       <EmbeddedShopifyLock />
+      <AppHostLock />
       {!isEmbeddedShopify() && <ConsultationPopup />}
       <Routes>
         <Route path="/auth" element={<Auth />} />
@@ -186,6 +223,7 @@ const AppRoutes = () => {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/shopify/connect" element={<ShopifyConnect />} />
+        <Route path="/shopify/app" element={<ShopifyEmbeddedApp />} />
         <Route path="/checkout/return" element={<CheckoutReturn />} />
         <Route path="/app" element={<ProtectedRoute><Index /></ProtectedRoute>} />
         <Route path="/" element={<RootRoute />} />
@@ -202,6 +240,7 @@ const AppRoutes = () => {
         <Route path="/blog/whatsapp-conversation-pricing-guide" element={<WhatsAppPricingGuide />} />
         <Route path="/info" element={<Info />} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/oauth/google-calendar/return" element={<GoogleCalendarReturn />} />
         <Route path="/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
 
         <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />

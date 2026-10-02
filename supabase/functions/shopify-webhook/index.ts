@@ -3,7 +3,7 @@
 // fulfillments/create, fulfillments/update.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { loadCustomAppCreds, verifyWebhookHmac } from "../_shared/shopify.ts";
+import { loadCustomAppCreds, v2AppCreds, verifyWebhookHmac } from "../_shared/shopify.ts";
 import { sendOrderConfirmation } from "../_shared/order-confirmation.ts";
 
 const corsHeaders = {
@@ -19,7 +19,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Accept webhooks signed by the public app or any configured custom app.
 const verifyHmac = (rawBody: string, headerHmac: string | null) =>
-  verifyWebhookHmac(rawBody, headerHmac, [SHOPIFY_CLIENT_SECRET, ...customApps.map((a) => a.client_secret)]);
+  verifyWebhookHmac(rawBody, headerHmac, [SHOPIFY_CLIENT_SECRET, v2AppCreds()?.client_secret, ...customApps.map((a) => a.client_secret)].filter(Boolean) as string[]);
 
 function pickTracking(order: any): { number?: string; url?: string; company?: string } {
   const fulfillments = order?.fulfillments || [];

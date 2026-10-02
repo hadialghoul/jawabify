@@ -11,10 +11,22 @@ export function stripQtyPrefix(s: string): string {
 }
 
 export function tokenize(s: string): string[] {
-  return stripQtyPrefix(s)
+  return normalizeProductQuery(stripQtyPrefix(s))
     .replace(/['"’]/g, "")
     .split(/[^a-z0-9]+/i)
     .filter((t) => t.length > 1 && !STOP.has(t));
+}
+
+/** Repairs common joined/mistyped model names before catalog search. */
+export function normalizeProductQuery(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\bai\s*force\b/g, "air force")
+    .replace(/\bairforce\b/g, "air force")
+    .replace(/([a-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** 0..1000 similarity between a requested name and a product title. */
@@ -47,14 +59,15 @@ export async function findCandidates(
   rawName: string,
   fallback: RestLikeProduct[] = [],
 ): Promise<RestLikeProduct[]> {
-  const tokens = tokenize(rawName);
+  const normalizedName = normalizeProductQuery(rawName);
+  const tokens = tokenize(normalizedName);
   const queries: string[] = [];
   if (tokens.length > 0) {
     for (let n = Math.min(tokens.length, 4); n >= 1; n--) {
       queries.push(tokens.slice(0, n).map((t) => `title:${t}*`).join(" AND "));
     }
   }
-  const phrase = stripQtyPrefix(rawName);
+  const phrase = stripQtyPrefix(normalizedName);
   if (phrase) queries.push(phrase);
 
   for (const q of queries) {

@@ -54,7 +54,10 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 };
 
-export function OverviewDashboard({ onSelectByPhone }: { onSelectByPhone?: (phone: string) => void } = {}) {
+export function OverviewDashboard({
+  onSelectByPhone,
+  topItemsLabel = 'Top products',
+}: { onSelectByPhone?: (phone: string) => void; topItemsLabel?: string } = {}) {
   const [range, setRange] = useState<{ from: Date; to: Date }>(() => ({
     from: startOfDay(subDays(new Date(), 29)),
     to: endOfDay(new Date()),
@@ -388,10 +391,10 @@ export function OverviewDashboard({ onSelectByPhone }: { onSelectByPhone?: (phon
           </Card>
         </div>
 
-        {/* Top products */}
+        {/* Top items */}
         <Card className="p-4">
           <div className="mb-3">
-            <h4 className="font-semibold">Top products</h4>
+            <h4 className="font-semibold">{topItemsLabel}</h4>
             <p className="text-xs text-muted-foreground">By order count</p>
           </div>
           {topProducts.length === 0 ? (

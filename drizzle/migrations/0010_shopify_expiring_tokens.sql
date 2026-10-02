@@ -1,0 +1,1 @@
+ALTER TABLE public.tenant_credentials ADD COLUMN IF NOT EXISTS refresh_token text, ADD COLUMN IF NOT EXISTS token_expires_at timestamptz;

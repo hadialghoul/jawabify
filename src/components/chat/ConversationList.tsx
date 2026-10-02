@@ -10,6 +10,17 @@ import { useState, useMemo, useDeferredValue, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTeamRoster, memberLabel } from '@/hooks/useTeamRoster';
+import { Tag } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+const LEAD_TAGS = [
+  { value: 'new', label: 'New' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow up' },
+  { value: 'not_interested', label: 'Not interested' },
+] as const;
 
 type AssignmentFilter = 'all' | 'mine' | 'unassigned';
 
@@ -66,6 +77,16 @@ export function ConversationList({
   instagramConnected = false,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({});
+  const setStatus = async (contact: Contact, value: string) => {
+    const previous = statusOverrides[contact.id] || contact.leadStatus || 'new';
+    setStatusOverrides((s) => ({ ...s, [contact.id]: value }));
+    const { error } = await supabase.from('contacts').update({ lead_status: value }).eq('id', contact.id);
+    if (error) {
+      setStatusOverrides((s) => ({ ...s, [contact.id]: previous }));
+      toast.error('Could not save tag');
+    }
+  };
   const deferredQuery = useDeferredValue(searchQuery);
   const [remoteResults, setRemoteResults] = useState<Contact[]>([]);
   const [remoteSearching, setRemoteSearching] = useState(false);
@@ -306,19 +327,22 @@ export function ConversationList({
           </div>
         )}
         {visibleContacts.map((contact) => {
-
-
           const unread = !!(contact.unreadCount && contact.unreadCount > 0);
           const isSelected = selectedContactId === contact.id;
+          const status = statusOverrides[contact.id] || contact.leadStatus || 'new';
+          const statusLabel = LEAD_TAGS.find((t) => t.value === status)?.label || 'New';
           return (
-            <button
+            <div
               key={contact.id}
-              onClick={() => onSelectContact(contact)}
-              className={`group mb-0.5 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
+              className={`group mb-0.5 flex w-full items-center gap-1 rounded-xl pr-1 transition-all duration-200 ${
                 isSelected
                   ? 'bg-primary/10 ring-1 ring-primary/30 shadow-sm'
                   : 'hover:bg-muted/60'
               }`}
+            >
+            <button
+              onClick={() => onSelectContact(contact)}
+              className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left"
             >
               <div className="relative shrink-0">
                 <Avatar className="h-10 w-10 ring-2 ring-background">
@@ -359,9 +383,13 @@ export function ConversationList({
                     </span>
                   )}
                 </div>
-                {isTeamAccount && (
-                  <div className="mt-1 flex items-center gap-1 text-[10px]">
-                    {contact.assignedMemberId ? (
+                <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                  {status !== 'new' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
+                      <Tag className="h-3 w-3" />{statusLabel}
+                    </span>
+                  )}
+                  {isTeamAccount && (contact.assignedMemberId ? (
                       <span
                         className={cn(
                           'inline-flex max-w-full items-center gap-1 rounded-full px-1.5 py-0.5 font-medium',
@@ -381,11 +409,25 @@ export function ConversationList({
                       <span className="inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400">
                         Unassigned
                       </span>
-                    )}
-                  </div>
-                )}
+                    ))}
+                </div>
               </div>
             </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground" aria-label={`Tag ${contact.name}`}>
+                  <Tag className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {LEAD_TAGS.map((t) => (
+                  <DropdownMenuItem key={t.value} onClick={() => setStatus(contact, t.value)} className={t.value === status ? 'font-semibold text-primary' : ''}>
+                    {t.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            </div>
           );
         })}
         {hasMore && (

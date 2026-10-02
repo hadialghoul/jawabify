@@ -4,10 +4,15 @@ import { Order } from '@/types/order';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Search, UserRound, Mail, MapPin, Phone, Package, MessageSquare, Download, Upload } from 'lucide-react';
+import { Search, UserRound, Mail, MapPin, Phone, Package, MessageSquare, Download, Upload, Pencil } from 'lucide-react';
+import type { ClientEdits } from './EditClientDialog';
 
 const ImportContactsDialog = lazy(() =>
   import('./ImportContactsDialog').then((m) => ({ default: m.ImportContactsDialog })),
+);
+
+const EditClientDialog = lazy(() =>
+  import('./EditClientDialog').then((m) => ({ default: m.EditClientDialog })),
 );
 
 // Pasted numbers often carry invisible bidi/zero-width marks or Arabic-Indic digits.
@@ -39,6 +44,24 @@ interface CrmTabProps {
 export function CrmTab({ contacts, orders, onSelectContact }: CrmTabProps) {
   const [query, setQuery] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [editing, setEditing] = useState<Contact | null>(null);
+  // Local edits so changes show instantly even though the contact list is owned upstream.
+  const [edits, setEdits] = useState<Record<string, ClientEdits>>({});
+
+  const applyEdits = (c: Contact): Contact => {
+    const e = edits[c.id];
+    if (!e) return c;
+    return {
+      ...c,
+      name: e.name,
+      phoneNumber: e.phoneNumber,
+      email: e.email ?? undefined,
+      address: e.address ?? undefined,
+      notes: e.notes ?? undefined,
+      tags: e.tags,
+    };
+  };
+
 
   const ordersByContact = useMemo(() => {
     const m = new Map<string, Order[]>();
@@ -54,7 +77,8 @@ export function CrmTab({ contacts, orders, onSelectContact }: CrmTabProps) {
   const rows = useMemo(() => {
     const q = sanitizeQuery(query).toLowerCase();
     return contacts
-      .map((c) => {
+      .map((raw) => {
+        const c = applyEdits(raw);
         const co = ordersByContact.get(c.id) || [];
         const totalSpent = co.reduce(
           (sum, o) => sum + (o.deliveryFee || 0) + (o.quantity || 0) * 0,
@@ -91,7 +115,7 @@ export function CrmTab({ contacts, orders, onSelectContact }: CrmTabProps) {
         const bv = b.lastOrderAt?.getTime() || b.contact.lastMessageTime?.getTime() || 0;
         return bv - av;
       });
-  }, [contacts, ordersByContact, query]);
+  }, [contacts, ordersByContact, query, edits]);
 
   const exportCsv = () => {
     const header = ['Name', 'Phone', 'Email', 'Address', 'Tags', 'Notes', 'Orders', 'Last order'];
@@ -177,15 +201,27 @@ export function CrmTab({ contacts, orders, onSelectContact }: CrmTabProps) {
                         </p>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => onSelectContact(c)}
-                      title="Open chat"
-                      className="h-7 w-7 shrink-0"
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setEditing(c)}
+                        title="Edit client"
+                        aria-label={`Edit ${c.name || c.phoneNumber}`}
+                        className="h-7 w-7"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => onSelectContact(c)}
+                        title="Open chat"
+                        className="h-7 w-7"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   {(c.email || c.address) && (
@@ -234,6 +270,16 @@ export function CrmTab({ contacts, orders, onSelectContact }: CrmTabProps) {
       {importOpen && (
         <Suspense fallback={null}>
           <ImportContactsDialog open={importOpen} onOpenChange={setImportOpen} />
+        </Suspense>
+      )}
+      {editing && (
+        <Suspense fallback={null}>
+          <EditClientDialog
+            contact={editing}
+            open={!!editing}
+            onOpenChange={(o) => !o && setEditing(null)}
+            onSaved={(id, e) => setEdits((prev) => ({ ...prev, [id]: e }))}
+          />
         </Suspense>
       )}
     </div>

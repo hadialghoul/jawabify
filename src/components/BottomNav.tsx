@@ -27,6 +27,7 @@ import {
   Headphones,
   Phone,
   Mail,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import {
@@ -63,6 +64,7 @@ const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
     { key: "orders", label: "Orders", icon: Package },
     { key: "crm", label: "CRM", icon: Users },
     { key: "interested", label: "Interested", icon: Star },
+    { key: "no_order", label: "No order", icon: MessageCircleQuestion },
     { key: "flagged", label: "Flagged", icon: Flag },
     { key: "campaigns", label: "Campaigns", icon: Megaphone },
     { key: "ai_issues", label: "AI Issues", icon: Bot },
@@ -73,6 +75,7 @@ const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
     { key: "reservations", label: "Bookings", icon: CalendarDays },
     { key: "menu", label: "Menu", icon: BookOpen },
     { key: "tables", label: "Tables", icon: LayoutGrid },
+    { key: "no_order", label: "No order", icon: MessageCircleQuestion },
     ...COMMON_TAIL,
   ],
   real_estate: [
@@ -110,10 +113,9 @@ const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
   ],
   service: [
     ...COMMON_HEAD,
-    { key: "catalog", label: "Services", icon: Briefcase },
+    { key: "services", label: "Services", icon: Briefcase },
     { key: "sessions", label: "Bookings", icon: CalendarDays },
-    { key: "leads", label: "Leads", icon: UserPlus },
-    { key: "staff", label: "Staff", icon: UserRound },
+    { key: "leads", label: "Enquiries", icon: UserPlus },
     ...COMMON_TAIL,
   ],
 };

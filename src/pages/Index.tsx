@@ -29,6 +29,7 @@ import {
   GraduationCap,
   Check,
   CheckCheck,
+  MessageCircleQuestion,
 } from "lucide-react";
 
 
@@ -45,6 +46,7 @@ import { useChannelFilter, useInstagramConnection } from "@/hooks/useChannels";
 import { BottomNav } from "@/components/BottomNav";
 import { actingHeaders } from '@/lib/actingTenant';
 import { KeepAlive } from "@/components/KeepAlive";
+import { NoOrderPanel, contactsWithoutOrders } from "@/components/dashboard/SharedPanels";
 
 
 const OrdersList = lazy(() => import("@/components/orders/OrdersList").then((m) => ({ default: m.OrdersList })));
@@ -62,6 +64,7 @@ const AIIssuesTab = lazy(() => import("@/components/dashboard/AIIssuesTab").then
 const RestaurantDashboard = lazy(() => import("@/components/restaurant/RestaurantDashboard").then((m) => ({ default: m.RestaurantDashboard })));
 const RealEstateDashboard = lazy(() => import("@/components/real_estate/RealEstateDashboard").then((m) => ({ default: m.RealEstateDashboard })));
 const WellnessDashboard = lazy(() => import("@/components/wellness/WellnessDashboard").then((m) => ({ default: m.WellnessDashboard })));
+const ServiceDashboard = lazy(() => import("@/components/service/ServiceDashboard").then((m) => ({ default: m.ServiceDashboard })));
 const HealthcareDashboard = lazy(() => import("@/components/healthcare/HealthcareDashboard").then((m) => ({ default: m.HealthcareDashboard })));
 const EducationDashboard = lazy(() => import("@/components/education/EducationDashboard").then((m) => ({ default: m.EducationDashboard })));
 const VerticalComingSoon = lazy(() => import("@/components/VerticalComingSoon").then((m) => ({ default: m.VerticalComingSoon })));
@@ -98,11 +101,12 @@ const Index = () => {
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [showNewOrderDialog, setShowNewOrderDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<"chats" | "dashboard">("chats");
+  const [campaignLaunch, setCampaignLaunch] = useState<{ audience: 'interested' | 'no_order'; key: number } | null>(null);
   const [dashboardSubTab, setDashboardSubTab] = useState<
-    "overview" | "orders" | "crm" | "interested" | "campaigns" | "flagged" | "ai_issues"
+    "overview" | "orders" | "crm" | "interested" | "no_order" | "campaigns" | "flagged" | "ai_issues"
   >("overview");
   const [restaurantTab, setRestaurantTab] = useState<
-    "overview" | "orders" | "reservations" | "menu" | "tables" | "crm" | "flagged" | "campaigns" | "interested" | "ai_issues"
+    "overview" | "orders" | "reservations" | "menu" | "tables" | "crm" | "flagged" | "campaigns" | "interested" | "no_order" | "ai_issues"
   >("overview");
   const [realEstateTab, setRealEstateTab] = useState<
     "overview" | "listings" | "viewings" | "leads" | "agents" | "crm" | "flagged" | "campaigns" | "interested" | "ai_issues"
@@ -120,8 +124,12 @@ const Index = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { vertical: rawVertical } = useTenantVertical();
-  // Service businesses reuse the wellness screens (services, bookings calendar, staff, leads)
-  const vertical = rawVertical === "service" ? "wellness" : rawVertical;
+  // Service businesses share the booking data model with wellness but have their own
+  // screens (services, bookings, enquiries) — no staff, no packages.
+  const isService = rawVertical === "service";
+  const vertical = isService ? "wellness" : rawVertical;
+  // Navigation (rail + bottom bar) uses the real vertical so service gets its own items.
+  const navVertical = rawVertical;
   const { channel, setChannel } = useChannelFilter();
   const { connected: instagramConnected } = useInstagramConnection();
   const { flagged: flaggedContacts, setLocalResolved: setLocalFlaggedResolved, refetch: refetchFlagged } = useFlaggedContacts();
@@ -597,6 +605,7 @@ const Index = () => {
 
   const pendingOrdersCount = useMemo(() => orders.filter((o) => o.status === "pending").length, [orders]);
   const interestedCount = useMemo(() => contacts.filter((c) => c.isInterested).length, [contacts]);
+  const noOrderCount = useMemo(() => contactsWithoutOrders(contacts, orders).length, [contacts, orders]);
   // Flagged queue comes straight from the database (see useFlaggedContacts) so it
   // never depends on which contacts happen to be loaded in the paginated list.
   const unresolvedFlagged = useMemo(
@@ -699,7 +708,7 @@ const Index = () => {
       <div className="flex h-screen h-[100dvh] w-full overflow-hidden bg-background safe-top">
         {/* Left icon rail (desktop) */}
         <IconRail
-          vertical={vertical}
+          vertical={navVertical}
           active={railActive}
           onSelect={handleRailSelect}
           channel={channel}
@@ -708,6 +717,7 @@ const Index = () => {
             orders: pendingOrdersCount,
             chats: contacts.reduce((n, c) => n + ((c.unreadCount ?? 0) > 0 ? 1 : 0), 0),
             interested: interestedCount,
+            no_order: noOrderCount,
             flagged: unresolvedFlagged.length,
             ai_issues: unresolvedFlagged.length,
 
@@ -851,6 +861,19 @@ const Index = () => {
                       hideTabBar={!isMobile}
                     />
                   </Suspense>
+                ) : isService ? (
+                  <Suspense fallback={<PanelFallback />}>
+                    <ServiceDashboard
+                      contacts={contacts}
+                      onSelectContact={handleSelectContact}
+                      onToggleNeedsHuman={toggleNeedsHuman}
+                      onToggleInterested={toggleInterested}
+                      selectedContactId={selectedContact?.id ?? null}
+                      tab={wellnessTab as any}
+                      onTabChange={setWellnessTab as any}
+                      hideTabBar={!isMobile}
+                    />
+                  </Suspense>
                 ) : vertical === 'wellness' ? (
                   <Suspense fallback={<PanelFallback />}>
                     <WellnessDashboard
@@ -906,6 +929,7 @@ const Index = () => {
                           { v: "orders", icon: Package, label: "Orders", tour: "sub-orders", badge: pendingOrdersCount },
                           { v: "crm", icon: Users, label: "CRM", tour: "sub-crm" },
                           { v: "interested", icon: Sparkles, label: "Interested", tour: "sub-interested", badge: interestedCount },
+                          { v: "no_order", icon: MessageCircleQuestion, label: "No order yet", badge: noOrderCount },
                           { v: "flagged", icon: AlertCircle, label: "Flagged", tour: "sub-flagged", badge: unresolvedFlagged.length, danger: true },
                           { v: "campaigns", icon: Megaphone, label: "Campaigns", tour: "sub-campaigns" },
                           { v: "ai_issues", icon: AlertCircle, label: "AI Issues", tour: "ai-issues" },
@@ -1012,11 +1036,16 @@ const Index = () => {
 
                     <KeepAlive active={dashboardSubTab === "interested"}>
                       <div className="h-full flex flex-col">
-                        <div className="p-4 border-b">
+                        <div className="p-4 border-b flex items-start justify-between gap-3">
+                          <div>
                           <h3 className="font-semibold text-lg">Interested customers</h3>
                           <p className="text-sm text-muted-foreground">
                             Engagement & conversion analytics for flagged leads.
                           </p>
+                          </div>
+                          <Button size="sm" className="shrink-0" onClick={() => { setCampaignLaunch({ audience: 'interested', key: Date.now() }); setDashboardSubTab('campaigns'); }}>
+                            <Megaphone className="h-4 w-4 mr-1" /> Campaign ({interestedCount})
+                          </Button>
                         </div>
                         <div className="flex-1 overflow-hidden">
                           <InterestedDashboard
@@ -1030,8 +1059,18 @@ const Index = () => {
                       </div>
                     </KeepAlive>
 
+                    <KeepAlive active={dashboardSubTab === "no_order"}>
+                      <NoOrderPanel
+                        contacts={contacts}
+                        orders={orders}
+                        selectedContactId={selectedContact?.id || null}
+                        onSelectContact={handleSelectContact}
+                        onCampaign={() => { setCampaignLaunch({ audience: 'no_order', key: Date.now() }); setDashboardSubTab('campaigns'); }}
+                      />
+                    </KeepAlive>
+
                     <KeepAlive active={dashboardSubTab === "campaigns"}>
-                      <CampaignsTab contacts={contacts} />
+                      <CampaignsTab contacts={contacts} launch={campaignLaunch} />
                     </KeepAlive>
 
                     <KeepAlive active={dashboardSubTab === "ai_issues"}>
@@ -1175,13 +1214,14 @@ const Index = () => {
 
       {showMobileBottomNav && (
         <BottomNav
-          vertical={vertical}
+          vertical={navVertical}
           active={railActive}
           onSelect={handleRailSelect}
           badges={{
             orders: pendingOrdersCount,
             chats: contacts.reduce((n, c) => n + ((c.unreadCount ?? 0) > 0 ? 1 : 0), 0),
             interested: interestedCount,
+            no_order: noOrderCount,
             flagged: unresolvedFlagged.length,
             ai_issues: unresolvedFlagged.length,
           }}

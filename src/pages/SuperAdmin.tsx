@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
   SidebarHeader, SidebarFooter, useSidebar,
@@ -14,8 +19,45 @@ import {
 import {
   Loader2, Search, Users, Building2, MessageSquare, ShoppingBag,
   LogOut, CreditCard, TrendingUp, UserPlus, AlertTriangle, RefreshCw, Mail, Inbox,
-  Settings as SettingsIcon, User as UserIcon, BookOpen, LayoutGrid, Shield, Megaphone, Send, Eye,
+  Settings as SettingsIcon, User as UserIcon, BookOpen, LayoutGrid, Shield, Megaphone, Send, Eye, Trash2, Tag,
 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+
+const LEAD_TAGS = [
+  { value: 'new', label: 'New' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow up' },
+  { value: 'not_interested', label: 'Not interested' },
+] as const;
+type LeadStatus = typeof LEAD_TAGS[number]['value'];
+const getLeadStatus = (row?: { lead_status?: string | null } | null): LeadStatus =>
+  ((row?.lead_status as LeadStatus) || 'new');
+
+// Leads tab (ad form + popup) tag set — separate from inbox/user tags.
+const LEADS_TAB_TAGS = [
+  { value: 'joined', label: 'Joined', text: 'text-emerald-600', dot: 'bg-emerald-500' },
+  { value: 'scheduled', label: 'Scheduled', text: 'text-amber-600', dot: 'bg-amber-500' },
+  { value: 'no_response', label: 'No response', text: 'text-red-800', dot: 'bg-red-800' },
+  { value: 'follow_up', label: 'Follow up', text: 'text-red-500', dot: 'bg-red-400' },
+] as const;
+type LeadTabStatus = typeof LEADS_TAB_TAGS[number]['value'];
+const getLeadTabStatus = (row?: { lead_status?: string | null } | null): LeadTabStatus => {
+  const v = row?.lead_status ?? '';
+  if (LEADS_TAB_TAGS.some((t) => t.value === v)) return v as LeadTabStatus;
+  if (v === 'new' || v === 'not_interested') return 'no_response';
+  if (v === 'interested' || v === 'follow_up') return 'follow_up';
+  return 'no_response';
+};
+
+function LeadTagBadge({ status }: { status: LeadTabStatus }) {
+  const tag = LEADS_TAB_TAGS.find((t) => t.value === status);
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+      <span className={`h-2 w-2 shrink-0 rounded-full ${tag?.dot ?? 'bg-muted-foreground'}`} />
+      <span className={tag?.text}>{tag?.label}</span>
+    </span>
+  );
+}
 import { SuperAdminMessagesTab } from '@/components/superadmin/MessagesTab';
 import { SuperAdminCampaignsTab } from '@/components/superadmin/CampaignsTab';
 import { SuperAdminBroadcastTab } from '@/components/superadmin/BroadcastTab';
@@ -91,6 +133,85 @@ function GrantFreeAccessButton({ userId, tenantName }: { userId: string | null; 
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
       Free days
     </Button>
+  );
+}
+
+function DeleteAccountButton({ tenantId, tenantName }: { tenantId: string | null; tenantName: string }) {
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!tenantId) return null;
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('super-admin-delete-tenant', {
+        body: { tenant_id: tenantId },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success(`${tenantName} and all of its data were deleted`);
+      setOpen(false);
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to delete the account');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setConfirmText('');
+      }}
+    >
+      <AlertDialogTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 text-destructive hover:text-destructive"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {tenantName} permanently?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This erases everything for this account — chats, contacts, orders, menus, settings,
+            connections, team logins and billing. It cannot be undone. Any paid plan is cancelled first.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Type <span className="font-semibold text-foreground">{tenantName}</span> to confirm.
+          </p>
+          <Input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={tenantName}
+            autoFocus
+          />
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Keep account</AlertDialogCancel>
+          <Button
+            variant="destructive"
+            disabled={busy || confirmText.trim() !== tenantName.trim()}
+            onClick={remove}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Delete forever
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -512,6 +633,24 @@ function AnalyticsView({ data }: { data: Overview }) {
 function UsersList({ data }: { data: Overview }) {
   const [q, setQ] = useState('');
   const manage = useManageAccount();
+  const [tags, setTags] = useState<Record<string, LeadStatus>>({});
+  useEffect(() => {
+    supabase.from('user_lead_tags' as any).select('user_id, lead_status').then(({ data: rows }) => {
+      const map: Record<string, LeadStatus> = {};
+      (rows as any[] ?? []).forEach((r) => { map[r.user_id] = getLeadStatus(r); });
+      setTags(map);
+    });
+  }, []);
+  const setUserTag = async (userId: string, status: LeadStatus) => {
+    const prev = tags[userId];
+    setTags((t) => ({ ...t, [userId]: status }));
+    const { error } = await supabase.from('user_lead_tags' as any)
+      .upsert({ user_id: userId, lead_status: status, updated_at: new Date().toISOString() } as any, { onConflict: 'user_id' });
+    if (error) {
+      toast.error('Could not save tag');
+      setTags((t) => ({ ...t, [userId]: prev ?? 'new' }));
+    }
+  };
   const rows = useMemo(() => {
     const entries = Object.entries(data.emailMap).map(([userId, info]) => {
       const profile = data.profiles.find((p: any) => p.user_id === userId);
@@ -570,13 +709,29 @@ function UsersList({ data }: { data: Overview }) {
                 <p className="text-xs text-muted-foreground mt-1">
                   Signed up {format(new Date(r.created_at), 'MMM d, yyyy')}
                   {r.last_sign_in_at
-                    ? ` · Last sign-in ${format(new Date(r.last_sign_in_at), 'MMM d, yyyy')}`
+                    ? ` · Last sign-in ${format(new Date(r.last_sign_in_at), 'MMM d, yyyy · h:mm a')}`
                     : ' · Never signed in'}
                 </p>
                 {r.profile?.contact_phone && <p className="text-xs text-muted-foreground">📞 {r.profile.contact_phone}</p>}
               </div>
-              <div className="w-full sm:w-auto [&>button]:w-full [&>button]:h-11 sm:[&>button]:w-auto sm:[&>button]:h-9">
+              <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto [&>button]:h-11 sm:[&>button]:h-9" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1.5">
+                      <Tag className="h-4 w-4" />
+                      {LEAD_TAGS.find((t) => t.value === (tags[r.userId] ?? 'new'))?.label}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {LEAD_TAGS.map((t) => (
+                      <DropdownMenuItem key={t.value} onClick={() => setUserTag(r.userId, t.value)}>
+                        {t.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <ManageAccountButton tenantId={r.tenant?.id ?? null} tenantName={r.tenant?.name ?? r.email ?? 'Account'} />
+                <DeleteAccountButton tenantId={r.tenant?.id ?? null} tenantName={r.tenant?.name ?? 'Account'} />
               </div>
             </div>
           </Card>
@@ -636,7 +791,7 @@ function TenantsList({ data, q }: { data: Overview; q: string }) {
                 <p className="text-sm text-muted-foreground">{owner?.email ?? t.owner_user_id}</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   Created {format(new Date(t.created_at), 'MMM d, yyyy')}
-                  {owner?.last_sign_in_at && ` · Last sign-in ${format(new Date(owner.last_sign_in_at), 'MMM d, yyyy')}`}
+                  {owner?.last_sign_in_at && ` · Last sign-in ${format(new Date(owner.last_sign_in_at), 'MMM d, yyyy · h:mm a')}`}
                   {' · '}{tenantMembers.length} member{tenantMembers.length === 1 ? '' : 's'}
                 </p>
                 {(ownerProfile?.country || ownerProfile?.city || ownerProfile?.address) && (
@@ -666,6 +821,7 @@ function TenantsList({ data, q }: { data: Overview; q: string }) {
                 <div className="grid grid-cols-2 gap-2 [&>button]:h-11 sm:flex sm:[&>button]:h-9">
                   <GrantFreeAccessButton userId={t.owner_user_id} tenantName={t.name} />
                   <ManageAccountButton tenantId={t.id} tenantName={t.name} />
+                  <DeleteAccountButton tenantId={t.id} tenantName={t.name} />
                 </div>
               </div>
 
@@ -951,6 +1107,16 @@ function LeadsView() {
     setLoading(false);
   };
 
+  const setLeadStatus = async (row: any, leadStatus: LeadTabStatus) => {
+    const previous = row.lead_status;
+    setRows((current) => current.map((item) => item.id === row.id ? { ...item, lead_status: leadStatus } : item));
+    const { error } = await supabase.from('consultation_leads').update({ lead_status: leadStatus } as any).eq('id', row.id);
+    if (error) {
+      toast.error('Could not save lead tag');
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, lead_status: previous } : item));
+    }
+  };
+
   useEffect(() => { load(); }, []);
 
   const isAdForm = (r: any) => String(r.source_path || '').includes('/form');
@@ -994,6 +1160,7 @@ function LeadsView() {
             <thead className="text-left text-xs uppercase text-muted-foreground border-b">
               <tr>
                 <th className="py-2 pr-3">When</th>
+                <th className="py-2 pr-3">Status</th>
                 <th className="py-2 pr-3">Source</th>
                 <th className="py-2 pr-3">Name</th>
                 <th className="py-2 pr-3">Email</th>
@@ -1006,6 +1173,33 @@ function LeadsView() {
                 <tr key={r.id} className="border-b border-border/60 hover:bg-muted/30 align-top">
                   <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
                     {format(new Date(r.created_at), 'MMM d, HH:mm')}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5"
+                          aria-label={`Change lead status for ${r.full_name}`}
+                        >
+                          <LeadTagBadge status={getLeadTabStatus(r)} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bg-popover">
+                        {LEADS_TAB_TAGS.map((tag) => (
+                          <DropdownMenuItem
+                            key={tag.value}
+                            className="cursor-pointer"
+                            onSelect={() => setLeadStatus(r, tag.value)}
+                          >
+                            <span className={`mr-2 h-2 w-2 shrink-0 rounded-full ${tag.dot}`} />
+                            <span className={tag.value === getLeadTabStatus(r) ? `font-semibold ${tag.text}` : tag.text}>{tag.label}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </td>
                   <td className="py-2 pr-3">
                     <Badge variant={isAdForm(r) ? 'default' : 'secondary'}>{isAdForm(r) ? 'Ad form' : 'Popup'}</Badge>
@@ -1027,7 +1221,7 @@ function LeadsView() {
                       )}
                     </div>
                   </td>
-                  <td className="py-2 pr-3 text-xs text-muted-foreground max-w-[26rem] break-words">{r.source_path || '—'}</td>
+                  <td className="py-2 pr-3 text-xs text-muted-foreground max-w-[18rem] break-words">{r.source_path || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1040,8 +1234,39 @@ function LeadsView() {
                 <div className="min-w-0">
                   <p className="font-medium break-words">{r.full_name}</p>
                   <p className="text-xs text-muted-foreground">{format(new Date(r.created_at), 'MMM d, HH:mm')}</p>
+                  <div className="mt-1 text-[11px] font-medium">
+                    <LeadTagBadge status={getLeadTabStatus(r)} />
+                  </div>
                 </div>
-                <Badge variant={isAdForm(r) ? 'default' : 'secondary'}>{isAdForm(r) ? 'Ad form' : 'Popup'}</Badge>
+                <div className="flex shrink-0 items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-10 w-10 border border-border bg-background text-primary shadow-sm hover:bg-accent"
+                        aria-label={`Change lead status for ${r.full_name}`}
+                        title="Change lead tag"
+                      >
+                        <Tag className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-popover">
+                      {LEADS_TAB_TAGS.map((tag) => (
+                        <DropdownMenuItem
+                          key={tag.value}
+                          className="cursor-pointer"
+                          onSelect={() => setLeadStatus(r, tag.value)}
+                        >
+                          <span className={`mr-2 h-2 w-2 shrink-0 rounded-full ${tag.dot}`} />
+                          <span className={tag.value === getLeadTabStatus(r) ? `font-semibold ${tag.text}` : tag.text}>{tag.label}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Badge variant={isAdForm(r) ? 'default' : 'secondary'}>{isAdForm(r) ? 'Ad form' : 'Popup'}</Badge>
+                </div>
               </div>
               <div className="mt-3 grid gap-2 text-sm">
                 <a className="min-h-11 flex items-center rounded-md border px-3 text-primary break-all" href={`mailto:${r.email}`}>{r.email}</a>

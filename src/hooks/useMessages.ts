@@ -19,7 +19,7 @@ const CONTACT_FETCH_LIMIT = 1500;
 // Only the columns the inbox actually renders — `select('*')` pulled large
 // notes/tags payloads for thousands of rows and dominated first paint.
 const CONTACT_COLUMNS =
-  'id,name,handle,phone_number,updated_at,is_interested,interest_reason,interested_at,needs_human,human_requested_at,email,address,notes,tags,ai_enabled,opted_out,opted_out_at,platform,external_id,assigned_member_id,assigned_at,blocked,blocked_at';
+  'id,name,handle,phone_number,updated_at,is_interested,interest_reason,interested_at,needs_human,human_requested_at,email,address,notes,tags,ai_enabled,opted_out,opted_out_at,platform,external_id,assigned_member_id,assigned_at,blocked,blocked_at,lead_status';
 
 
 export function useMessages() {
@@ -99,6 +99,7 @@ export function useMessages() {
         assignedAt: c.assigned_at ? new Date(c.assigned_at) : undefined,
         blocked: !!c.blocked,
         blockedAt: c.blocked_at ? new Date(c.blocked_at) : undefined,
+        leadStatus: c.lead_status || 'new',
       }));
     },
     []
@@ -753,14 +754,19 @@ export function useMessages() {
 
 
 
+  const loadedTenantRef = useRef<string | null>(null);
   useEffect(() => {
     if (!tenantId) {
       setContacts([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    fetchContacts().finally(() => setLoading(false));
+    // Only show the loading screen on the first load for this account.
+    if (loadedTenantRef.current !== tenantId) setLoading(true);
+    fetchContacts().finally(() => {
+      loadedTenantRef.current = tenantId;
+      setLoading(false);
+    });
   }, [fetchContacts, tenantId]);
 
   // Keep fetchContacts in a ref so the realtime effect doesn't tear down/recreate

@@ -3,7 +3,7 @@
 // Every request is verified with the app's HMAC-SHA256 signature.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { loadCustomAppCreds, verifyWebhookHmac } from "../_shared/shopify.ts";
+import { loadCustomAppCreds, v2AppCreds, verifyWebhookHmac } from "../_shared/shopify.ts";
 
 const SHOPIFY_CLIENT_SECRET = Deno.env.get("SHOPIFY_CLIENT_SECRET")!;
 const customApps = loadCustomAppCreds();
@@ -12,7 +12,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Accept requests signed by the public app or any configured custom app.
 const verifyHmac = (rawBody: string, headerHmac: string | null) =>
-  verifyWebhookHmac(rawBody, headerHmac, [SHOPIFY_CLIENT_SECRET, ...customApps.map((a) => a.client_secret)]);
+  verifyWebhookHmac(rawBody, headerHmac, [SHOPIFY_CLIENT_SECRET, v2AppCreds()?.client_secret, ...customApps.map((a) => a.client_secret)].filter(Boolean) as string[]);
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });

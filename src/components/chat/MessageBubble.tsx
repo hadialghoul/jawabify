@@ -37,9 +37,13 @@ export function MessageBubble({
   const hasMedia = !!message.mediaUrl;
   const hasImage = hasMedia && isImageType(message.mediaType);
   const placeholder = mediaPlaceholder(message.mediaType);
+  // The AI's internal photo analysis is stored as the message content so the
+  // assistant can use it later; staff should never see those machine notes.
   const hideContent =
     hasMedia &&
-    (PLACEHOLDERS.includes(message.content) || message.content === placeholder);
+    (PLACEHOLDERS.includes(message.content) ||
+      message.content === placeholder ||
+      /^\[Image received/i.test(message.content || ''));
 
   const StatusIcon = () => {
     switch (message.status) {

@@ -1,9 +1,13 @@
+import { handlePaymentReply } from "./online-payment.ts";
+import { tryQuickAnswer } from "./quick-answers.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { matchProduct, stripQtyPrefix } from '../_shared/product-match.ts';
+import { matchProduct, stripQtyPrefix, findCandidates, scoreTitle, normalizeProductQuery } from '../_shared/product-match.ts';
+import { fetchProductById } from '../_shared/shopify.ts';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { runRestaurantFlow } from "./restaurant.ts";
 import { runRealEstateFlow } from "./real_estate.ts";
 import { runWellnessFlow } from "./wellness.ts";
+import { runServiceFlow } from "./service.ts";
 import { runHealthcareFlow } from "./healthcare.ts";
 import { runEducationFlow } from "./education.ts";
 import { getActiveSession, handleSessionMessage, startOrderFlow, type OrderFlowDeps, type CatalogItem } from "./order-flow.ts";
@@ -35,7 +39,9 @@ const LOW_CONFIDENCE_PATTERNS = [
   /get back to you/i,
   /let me check/i,
   /check with (the )?(team|manager|owner|store|shop|supplier|staff)/i,
-  /i'?ll (ask|find out|confirm|check)/i,
+  // "I'll confirm your order" is a normal order reply, not uncertainty — only
+  // flag when the AI promises to ask/check/find out for the customer.
+  /i'?ll (ask|find out|check)\b/i,
   /follow up with you/i,
   /ما بعرف/i,
   /لا أعرف/i,
@@ -207,7 +213,8 @@ When a customer asks about stock, availability, or how many you have, NEVER tell
 ## NEVER ASK PERMISSION TO CHECK WITH THE TEAM
 Never ask the customer "can I ask the team?", "fiye es'al lal team?", "do you want me to check?", "should I ask?" or any similar permission question. You act, you don't request permission.
 - If the customer corrects you about which product they mean ("mish hayde", "no not that one", "this projection lamp"), re-read the catalog and answer about the product THEY named — match on any word of the name (e.g. "projection lamp" → the catalog item containing "projection"). Do not repeat the wrong product.
-- Only if that product genuinely has no catalog entry: state it as a fact in ONE sentence in their language ("The team will confirm the price shortly."), then call transfer_to_human. Never phrase it as a question.
+- PRICE & SIZES FIRST (MANDATORY): when a customer asks about a product ("3indak airforce", "do you have X", "kam se3ro"), and its price is not in a [LIVE CATALOG] entry above, you MUST call search_products first. Then answer with the price and available sizes in one line (e.g. "Eh mawjoud — Nk Air Force 1'07 Low b $70, sizes 36-45."). If several models match, list them with their prices. NEVER say "l team by2akkedlak l se3er", "the team will confirm the price" or any equivalent without calling search_products first.
+- Only if search_products returns nothing for that product: state it as a fact in ONE sentence in their language, then call transfer_to_human. Never phrase it as a question.
 
 
 
@@ -228,7 +235,9 @@ Do NOT reply with any text alongside start_order_flow — let the flow speak.
 
 
 ## Order Management (existing orders only)
-- Use get_order_info to look up existing order details. Search by order number OR by customer phone number.
+- ALWAYS call get_order_info before you say ANYTHING about an existing order (status, payment, items, delivery, tracking, cancellation) — even if the order was discussed earlier in this same chat. Never answer an order question from memory.
+- If the customer gives a number, pass it as order_display_id exactly as written. If they ask about "my order" / "where is my order" with no number, call get_order_info with NO arguments — their WhatsApp number is used automatically. Never ask them for their phone number; you already have it.
+- If the lookup returns several orders, ask the customer which one (by number) instead of guessing.
 - Use update_order_status to change an order's status (e.g. cancel it).
 - Use update_order_details to change the customer name, delivery address, or items on a pending order. If the customer tells you their name (or corrects it) after an order exists, you MUST call update_order_details with customer_name for their most recent pending order before saying anything is updated.
 - NEVER FABRICATE ORDER RESULTS. If get_order_info returns TOOL_FAILED, the order does NOT exist — do NOT pretend you found it, do NOT invent a customer name, product, or status. Ask the customer to double-check the number.
@@ -236,15 +245,17 @@ Do NOT reply with any text alongside start_order_flow — let the flow speak.
 - The same order number must return the SAME result within a conversation. If you said "not found" earlier and the customer repeats the exact same number, it is STILL not found — do not flip to "found" without a new successful get_order_info call.
 
 ## Sending Images — MANDATORY
-You HAVE the ability to send images. You MUST use the send_image tool whenever a customer asks to see, view, look at, or get a photo/picture/image of an item — in ANY language including Lebanese Arabizi. This includes ALL variants and typos: "can I see it?", "send me a photo", "show me", "do you have pictures?", "can see an image", "see image", "pic?", "photo?", "صورة", "صور", "بدي شوف", "show pic", "any pics?", "image?", "send pic", "suwar", "soura", "sura", "fi suwar", "bade suwar", "aandak suwar", "warjine", "farjine". If the latest user message contains ANY of these words — see, look, view, show, photo, picture, image, pic, snap, suwar, soura, sura, صورة, صور, شوف — and refers (even implicitly) to a product just discussed, you MUST call send_image with the best-matching label from Available Images. Do not ask "which one?" if there is only one product in context — use it. EXCEPTION: if that product appears in the COLOR OPTIONS section below, first ask which color they want to see and list every color from that section, then send the photo once they pick.
+You HAVE the ability to send images. You MUST use the send_image tool whenever a customer asks to see, view, look at, or get a photo/picture/image of an item — in ANY language including Lebanese Arabizi. This includes ALL variants and typos: "can I see it?", "send me a photo", "show me", "do you have pictures?", "can see an image", "see image", "pic?", "photo?", "صورة", "صور", "بدي شوف", "show pic", "any pics?", "image?", "send pic", "suwar", "soura", "sura", "fi suwar", "bade suwar", "aandak suwar", "warjine", "farjine". If the latest user message contains ANY of these words — see, look, view, show, photo, picture, image, pic, snap, suwar, soura, sura, صورة, صور, شوف — and refers (even implicitly) to a product just discussed, you MUST call send_image with the best-matching label from Available Images. Do not ask "which one?" if there is only one product in context — use it. If the product has several colors and the customer did not name one, call send_image with all_colors=true to send one photo per color; if they named a color, pass it in "color".
 
-ONE IMAGE AT A TIME: You may only send ONE image per turn. If the customer asks for photos of multiple products at once (plural: "la ellon", "kellon", "all of them", "send me pics of all", "هودول", "كلهن", "صور المنتجات", "sowar la ellon", "suwar la kellon"), do NOT call send_image and do NOT refuse. Instead, ask them to pick ONE — and you MUST list the actual options by name.
+PICK ONE PRODUCT: If the customer asks to see photos while several different products match (or asks for all of them), do NOT call send_image and do NOT refuse. Simply ask which one they want to see, listing the actual options by name. NEVER mention a limit — never say "sourat wehde bass", "fiye ab3atlak sourat wehde bass", "I can only send one", "one at a time" or any equivalent.
+
+COLOR QUESTIONS (NEVER DEFER): if the customer asks which colors exist ("shu fi alwan", "anou alwan", "what colors", "fe meno alwan", "available colors", "أي ألوان"), you MUST call search_products for that product first and answer from the "colors:" list it returns. Never reply that the team or a team member will confirm the colors, and never call transfer_to_human for a color question. If the search returns no colors for that product, say it comes in one color only. As soon as the customer picks a color, call send_image with that product's label and that color.
 
 NEVER ASK A BLANK QUESTION: any clarification question about which product, variant, model or color MUST list the concrete choices (up to 6, comma-separated) taken from the products currently in context, the COLOR OPTIONS section, or Available Images. Asking "ay product baddak tshouf?" / "which one?" / "which model?" with no list is FORBIDDEN. This is the one case where you may exceed 15 words — the list may be as long as needed. If the customer named a product family (e.g. "Nike Pegasus") and several matching items or colors exist, list those exact matching names/colors. Only if you truly have no matching names may you ask openly.
 Examples (correct):
-- EN: "I can send one at a time — Pegasus 40, Pegasus 41 or Pegasus Trail 4?"
-- Arabizi: "Fiye ab3atlak sourat wehde bass — Pegasus 40, Pegasus 41 aw Pegasus Trail 4?"
-- Arabic: "بقدر ابعت صورة وحدة بس — Pegasus 40، Pegasus 41 أو Pegasus Trail 4؟"
+- EN: "Which one would you like to see — Pegasus 40, Pegasus 41 or Pegasus Trail 4?"
+- Arabizi: "Aya wehde baddak tshuf — Pegasus 40, Pegasus 41 aw Pegasus Trail 4?"
+- Arabic: "أي وحدة بدك تشوف — Pegasus 40، Pegasus 41 أو Pegasus Trail 4؟"
 Example (WRONG, never do this): "Fiye ab3atlak sourat wehde bass — ay product baddak tshouf?"
 Once the customer names a single product, call send_image for that one.
 
@@ -354,13 +365,14 @@ const GET_ORDER_INFO_TOOL = {
   type: "function",
   function: {
     name: "get_order_info",
-    description: "Look up detailed info about an order. Provide order_display_id if the customer gives an order number, OR provide customer_phone to find their most recent orders. Always checks Shopify for the latest fulfillment/tracking info.",
+    description: "Look up an order. ALWAYS call this before saying anything about an order's status, payment, delivery or tracking — never answer from memory or from earlier messages. Pass order_display_id when the customer gives a number. Call it with NO arguments when they ask about 'my order' without a number: their WhatsApp number is used automatically. Checks the connected store first, then orders taken on this platform.",
     parameters: {
       type: "object",
       properties: {
-        order_display_id: { type: "number", description: "The order number (e.g. 1676). Use this when the customer provides an order number." },
-        customer_phone: { type: "string", description: "Customer phone number to search orders by. Use when customer asks about 'my order' without providing a number." },
+        order_display_id: { type: "string", description: "The order number exactly as the customer wrote it (e.g. '1676' or '#1676'). Omit if they did not give one." },
+        customer_phone: { type: "string", description: "Only if the customer explicitly gives a different phone number than the one they are chatting from. Otherwise omit." },
       },
+
       additionalProperties: false
     }
   }
@@ -376,6 +388,7 @@ const SEND_IMAGE_TOOL = {
       properties: {
         image_label: { type: "string", description: "Label of the image to send (must match exactly)" },
         color: { type: "string", description: "Color the customer chose, when the product comes in multiple colors (from COLOR OPTIONS). Omit if the product has one color." },
+        all_colors: { type: "boolean", description: "Set true to send one photo of EACH available color of this product (use when the customer asks for photos without naming a color)." },
         caption: { type: "string", description: "Optional caption" }
 
       },
@@ -386,6 +399,174 @@ const SEND_IMAGE_TOOL = {
 };
 
 type KnowledgeImage = { image_url: string; description: string };
+
+const SEARCH_PRODUCTS_TOOL = {
+  type: "function",
+  function: {
+    name: "search_products",
+    description: "Search the store's full live catalog (thousands of products). ALWAYS call this when the customer names or describes a product (brand, model, type, color, size) that is not clearly in your knowledge above, or asks what you have. Returns matching products with price, colors, sizes and stock. Never say a product doesn't exist without searching first.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Product words in English, e.g. 'nike vomero 18' or 'black running shoes'" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+};
+
+async function matchProductCandidates(cred: any, q: string) {
+  const list = await findCandidates(cred.shop_domain, cred.access_token, q);
+  return list
+    .map((p) => ({ p, s: scoreTitle(q, p.title) }))
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.p);
+}
+
+async function getShopifyCred(supabase: any, tenantId: string | null | undefined) {
+  if (!tenantId) return null;
+  const { data: cred } = await supabase
+    .from('tenant_credentials').select('access_token, shop_domain')
+    .eq('tenant_id', tenantId).eq('provider', 'shopify').eq('is_active', true).maybeSingle();
+  return cred?.access_token && cred?.shop_domain ? cred : null;
+}
+
+/** Color option index (0-2) of a REST product, or -1. */
+function colorOptionIndex(p: any): number {
+  const opts: any[] = p?.options || [];
+  const i = opts.findIndex((o) => /colou?r|لون|shade/i.test(String(o?.name || '')));
+  return i;
+}
+
+/** One image per color for a Shopify product: [{color, src, imageId}]. */
+async function fetchColorImages(cred: any, pid: string): Promise<Array<{ color: string; src: string; imageId: number }>> {
+  const p = await fetchProductById(cred.shop_domain, cred.access_token, pid);
+  if (!p) return [];
+  const ci = colorOptionIndex(p);
+  if (ci < 0) return [];
+  const key = `option${ci + 1}`;
+  const images: any[] = p.images || [];
+  const out: Array<{ color: string; src: string; imageId: number }> = [];
+  const seen = new Set<string>();
+  const discoveredColors = new Set<string>();
+  const colorValues: string[] = [];
+  for (const v of p.variants || []) {
+    const color = String(v[key] || '').trim();
+    const colorKey = color.toLowerCase();
+    if (!color || discoveredColors.has(colorKey)) continue;
+    discoveredColors.add(colorKey);
+    colorValues.push(color);
+    const img = images.find((im) => im.id === v.image_id) ||
+      images.find((im) => im.id === v.featured_image?.id) ||
+      images.find((im) => (im.variant_ids || []).includes(v.id)) ||
+      images.find((im) => `${im.alt || ''} ${im.src || ''}`.toLowerCase().includes(color.toLowerCase()));
+    if (!img) continue;
+    seen.add(colorKey);
+    out.push({ color, src: img.src, imageId: Number(img.id || 0) });
+  }
+  // Many Shopify themes link only one variant photo (or none), while the product
+  // gallery still follows the color-option order. Fill every missing color from
+  // that order when the gallery has at least one image per color.
+  if (colorValues.length > 0 && images.length >= colorValues.length) {
+    for (const [index, color] of colorValues.entries()) {
+      const colorKey = color.toLowerCase();
+      if (seen.has(colorKey)) continue;
+      const image = images[index];
+      if (!image?.src) continue;
+      seen.add(colorKey);
+      out.push({ color, src: image.src, imageId: Number(image.id || 0) });
+    }
+  }
+  return out;
+}
+
+/**
+ * All color option values of a Shopify product (even colors with no photo), so
+ * the assistant can answer "what colors do you have?" from the live store
+ * instead of handing the question to a person.
+ */
+async function fetchProductColors(cred: any, pid: string): Promise<string[]> {
+  try {
+    const p = await fetchProductById(cred.shop_domain, cred.access_token, pid);
+    if (!p) return [];
+    const ci = colorOptionIndex(p);
+    if (ci < 0) return [];
+    const opt = (p.options || [])[ci];
+    const fromOption: string[] = Array.isArray(opt?.values) ? opt.values.map((v: any) => String(v || '').trim()) : [];
+    const key = `option${ci + 1}`;
+    const fromVariants: string[] = (p.variants || []).map((v: any) => String(v[key] || '').trim());
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of [...fromOption, ...fromVariants]) {
+      if (!c || seen.has(c.toLowerCase())) continue;
+      seen.add(c.toLowerCase());
+      out.push(c);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Removes internal "[shopify:pid:imgid]" tags so they never reach customers. */
+function cleanCaption(s?: string | null): string {
+  return String(s || '').replace(/\s*\[shopify:\d+:\d+\]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Finds the photo for a specific color. Imported Shopify photos only carry the
+ * product title, so ask Shopify which images belong to that color's variants
+ * (variant.image_id / image.variant_ids / image alt text).
+ */
+async function findColorImage(
+  supabase: any,
+  tenantId: string | null | undefined,
+  group: KnowledgeImage[],
+  color: string,
+): Promise<KnowledgeImage | null> {
+  const c = color.trim().toLowerCase();
+  if (!c) return null;
+  const direct = group.find((img) => `${cleanCaption(img.description)} ${img.image_url}`.toLowerCase().includes(c));
+  if (direct) return direct;
+  if (!tenantId) return null;
+  const pid = group.map((g) => String(g.description || '').match(/\[shopify:(\d+):\d+\]/)?.[1]).find(Boolean);
+  if (!pid) return null;
+  try {
+    const { data: cred } = await supabase
+      .from('tenant_credentials').select('access_token, shop_domain')
+      .eq('tenant_id', tenantId).eq('provider', 'shopify').eq('is_active', true).maybeSingle();
+    if (!cred?.access_token || !cred?.shop_domain) return null;
+    const p = await fetchProductById(cred.shop_domain, cred.access_token, pid);
+    if (!p) return null;
+    const matchesColor = (v: any) =>
+      [v.option1, v.option2, v.option3].some((o: any) => {
+        const ov = String(o || '').toLowerCase();
+        return ov && (ov === c || ov.includes(c) || c.includes(ov));
+      });
+    const variantIds = new Set((p.variants || []).filter(matchesColor).map((v: any) => v.id));
+    const imageIds = new Set((p.variants || []).filter(matchesColor).map((v: any) => v.image_id).filter(Boolean));
+    const images: any[] = p.images || [];
+    let hit =
+      images.find((im) => imageIds.has(im.id)) ||
+      (p.variants || []).filter(matchesColor).map((v: any) => v.featured_image).find((im: any) => im?.src) ||
+      images.find((im) => (im.variant_ids || []).some((id: any) => variantIds.has(id))) ||
+      images.find((im) => `${im.alt || ''} ${im.src || ''}`.toLowerCase().includes(c));
+    if (!hit) {
+      const ci = colorOptionIndex(p);
+      const key = ci >= 0 ? `option${ci + 1}` : '';
+      const colors = key ? [...new Set((p.variants || []).map((v: any) => String(v[key] || '').trim()).filter(Boolean))] : [];
+      const colorIndex = colors.findIndex((value) => value.toLowerCase() === c || value.toLowerCase().includes(c) || c.includes(value.toLowerCase()));
+      if (colorIndex >= 0 && images.length >= colors.length) hit = images[colorIndex];
+    }
+    if (!hit) return null;
+    const local = group.find((g) => String(g.description || '').includes(`:${hit.id}]`));
+    return local || { image_url: hit.src, description: '' };
+  } catch (e) {
+    console.error('findColorImage failed', e);
+    return null;
+  }
+}
 
 function isUnsupportedWhatsAppImageUrl(imageUrl: string): boolean {
   try {
@@ -407,29 +588,50 @@ function findBestImageLabel(
   const labels = Object.keys(imageGroups);
   if (!requested) return undefined; // never guess without a label
 
-  // Token-aware match: label shares a meaningful word (>=3 chars) with the request,
-  // or one string contains the other. Prevents random-image fallback like sending
-  // "Minecraft Torch Light" when the customer asked about flood lights.
-  const reqTokens = requested.split(/[^a-z0-9\u0600-\u06ff]+/i).filter((t) => t.length >= 3);
-  const candidates = labels.filter((label) => {
+  // Require the complete model identity, not merely a shared brand word. A loose
+  // one-token match made "Nike Vomero 18" select an unrelated Nike football shoe.
+  const usefulToken = (t: string) => t.length >= 3 || /^\d{2,}$/.test(t);
+  const reqTokens = requested.split(/[^a-z0-9\u0600-\u06ff]+/i).filter(usefulToken);
+  const candidates = labels.map((label) => {
     const lower = label.toLowerCase();
-    if (lower === requested) return true;
-    if (lower.includes(requested) || requested.includes(lower)) return true;
-    const labelTokens = lower.split(/[^a-z0-9\u0600-\u06ff]+/i).filter((t) => t.length >= 3);
-    return reqTokens.some((rt) => labelTokens.some((lt) => lt === rt || lt.includes(rt) || rt.includes(lt)));
-  });
+    const labelTokens = lower.split(/[^a-z0-9\u0600-\u06ff]+/i).filter(usefulToken);
+    const hits = reqTokens.filter((rt) => labelTokens.some((lt) => lt === rt)).length;
+    const exact = lower === requested;
+    const contains = lower.includes(requested) || requested.includes(lower);
+    const labelCovered = labelTokens.length >= 2 && labelTokens.every((lt) => reqTokens.includes(lt));
+    const requiredHits = reqTokens.length >= 2 ? Math.max(2, Math.ceil(reqTokens.length * 0.67)) : 1;
+    return { label, exact, contains, hits, qualifies: exact || contains || labelCovered || hits >= requiredHits };
+  }).filter((candidate) => candidate.qualifies);
 
   if (candidates.length === 0) return undefined; // no confident match → let caller report "not found"
 
   return candidates.sort((a, b) => {
-    const aSupported = getSendableImages(imageGroups[a]).length > 0 ? 1 : 0;
-    const bSupported = getSendableImages(imageGroups[b]).length > 0 ? 1 : 0;
+    const aSupported = getSendableImages(imageGroups[a.label]).length > 0 ? 1 : 0;
+    const bSupported = getSendableImages(imageGroups[b.label]).length > 0 ? 1 : 0;
     if (aSupported !== bSupported) return bSupported - aSupported;
-    const aExact = a.toLowerCase() === requested ? 1 : 0;
-    const bExact = b.toLowerCase() === requested ? 1 : 0;
-    if (aExact !== bExact) return bExact - aExact;
-    return b.length - a.length;
-  })[0];
+    if (a.exact !== b.exact) return Number(b.exact) - Number(a.exact);
+    if (a.contains !== b.contains) return Number(b.contains) - Number(a.contains);
+    if (a.hits !== b.hits) return b.hits - a.hits;
+    return a.label.length - b.label.length;
+  })[0]?.label;
+}
+
+function recentProductQuery(history: any[], currentMessage: string): string | null {
+  const colorOnly = /\b(black+|white|yellow|red|blue|green|grey|gray|beige|brown|pink|orange|purple|aswad|abyad|asfar|azra2|a7mar|lawn|color|one)\b/i;
+  const visualWords = /\b(see|show|photo|picture|image|pic|soura|suwar|farjine|warjine|shuf)\b/i;
+  const candidates = [...history, { role: 'user', content: currentMessage }].reverse();
+  for (const turn of candidates) {
+    if (turn?.role !== 'user' || typeof turn.content !== 'string') continue;
+    const raw = turn.content.split('\n').pop()?.trim() || '';
+    if (!raw || (colorOnly.test(raw) && (visualWords.test(raw) || raw.split(/\s+/).length <= 4))) continue;
+    const cleaned = normalizeProductQuery(raw)
+      .replace(/\b(3indk|3andak|aandak|do you have|have you got|available|bade|badde|want|need|please|pls)\b/gi, ' ')
+      .replace(/[^a-z0-9\u0600-\u06ff -]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.split(/\s+/).filter(Boolean).length >= 2) return cleaned;
+  }
+  return null;
 }
 
 
@@ -997,8 +1199,8 @@ async function buildSystemPrompt(
       })
       .join('\n\n');
     prompt += `\n\nKnowledge base:\n\n${knowledgeSection}`;
-    prompt += `\n\n## PRICE AUTHORITY (ABSOLUTE)\nPrices, sale prices and stock come ONLY from entries marked [LIVE CATALOG]. Entries marked [GENERAL NOTES] (website scrapes, manual notes, learned-from-conversation notes) contain OLD prices — never quote a number from them. If a price appears in both, the [LIVE CATALOG] number is correct. If the product has no [LIVE CATALOG] entry, state as a fact (never as a question, never asking permission) that the team will confirm the price, then call transfer_to_human — before doing that, re-check the catalog for a partial name match of the product the customer actually named. NEVER write the words '[old price removed]' or '[previous price removed]' in a reply — if you have no live catalog price, state that the team will confirm it. Never ask the customer for permission to check with the team.\nState the price ONCE, directly ("X is $9.99"). Never add "was/originally/kan aslan" or any old-price comparison unless the [LIVE CATALOG] entry itself lists a different higher compare-at price. When the customer asks about two or more products, give each product its own catalog price — never reuse one product's price for another.`;
-    prompt += `\n\n## NEVER DENY A PRODUCT EXISTS (ABSOLUTE)\nThe knowledge base above is only a small slice of a much larger catalog, so a product missing from it does NOT mean the store doesn't sell it. NEVER say a product is not in the catalog, does not exist, or is unavailable ("ma fi ... bel catalog", "we don't have that", "not available") just because you can't see it here. Instead: if a similar name appears above, treat that as the product and confirm the exact model in one short line; otherwise say the team will confirm and call transfer_to_human. Only stock/size details explicitly present in a [LIVE CATALOG] entry may be used to say a specific size or variant is unavailable.`;
+    prompt += `\n\n## PRICE AUTHORITY (ABSOLUTE)\nPrices, sale prices and stock come ONLY from entries marked [LIVE CATALOG]. Entries marked [GENERAL NOTES] (website scrapes, manual notes, learned-from-conversation notes) contain OLD prices — never quote a number from them. If a price appears in both, the [LIVE CATALOG] number is correct. If the product has no [LIVE CATALOG] entry, you MUST call search_products first and quote the live price and sizes it returns; only if the search finds nothing, state as a fact (never as a question, never asking permission) that the team will confirm the price, then call transfer_to_human — before doing that, re-check the catalog for a partial name match of the product the customer actually named. NEVER write the words '[old price removed]' or '[previous price removed]' in a reply — if you have no live catalog price, state that the team will confirm it. Never ask the customer for permission to check with the team.\nState the price ONCE, directly ("X is $9.99"). Never add "was/originally/kan aslan" or any old-price comparison unless the [LIVE CATALOG] entry itself lists a different higher compare-at price. When the customer asks about two or more products, give each product its own catalog price — never reuse one product's price for another.`;
+    prompt += `\n\n## NEVER DENY A PRODUCT EXISTS (ABSOLUTE)\nThe knowledge base above is only a small slice of a much larger catalog, so a product missing from it does NOT mean the store doesn't sell it. NEVER say a product is not in the catalog, does not exist, or is unavailable ("ma fi ... bel catalog", "we don't have that", "not available") just because you can't see it here. Instead: if a similar name appears above, treat that as the product and confirm the exact model in one short line; otherwise call search_products and answer with the live price and sizes; only if the search finds nothing say the team will confirm and call transfer_to_human. Only stock/size details explicitly present in a [LIVE CATALOG] entry may be used to say a specific size or variant is unavailable.`;
   }
 
 
@@ -1015,7 +1217,7 @@ async function buildSystemPrompt(
       .slice(0, 12)
       .map((c) => `- ${c.title}: ${c.colors.join(', ')}`)
       .join('\n');
-    prompt += `\n\n## COLOR OPTIONS (LIVE CATALOG — authoritative)\n${colorLines}\n\nRules for photo requests on multi-color products:\n- If the customer asks for a photo of a product listed above, do NOT call send_image yet. Reply with ONE short sentence in the customer's language asking which color they want to see, and LIST every color from this index for that product (e.g. "Ayya lawn baddak tshuf? Black, White, Red" / "Which color? Black, White, Red").\n- Once the customer names a color, call send_image with that product's label and pass the color in the "color" argument.\n- If the product is NOT in this index, do not ask about color — send the photo directly.\n- Never invent a color that is not listed here.`;
+    prompt += `\n\n## COLOR OPTIONS (LIVE CATALOG — authoritative)\n${colorLines}\n\nRules for photo requests on multi-color products:\n- If the customer asks for a photo of a product listed above WITHOUT naming a color, call send_image with that product's label and all_colors=true — this sends one photo of every available color.\n- Once the customer names a color, call send_image with that product's label and pass the color in the "color" argument.\n- If the product is NOT in this index, do not ask about color — send the photo directly.\n- Never invent a color that is not listed here.`;
   }
 
 
@@ -1337,9 +1539,68 @@ async function updateOrderDetails(supabase: any, displayId: number, tenantId: st
 }
 
 
-async function getOrderInfo(supabase: any, displayId: number | undefined, tenantId: string, customerPhone?: string): Promise<{ success: boolean; info?: string; error?: string }> {
+// ===== Order lookup (e-commerce only) =====
+// Deterministic contract: Shopify is the source of truth whenever the tenant has
+// a live store connection — we ask Shopify first and only fall back to the local
+// orders the AI took on our platform. With no store connected we search locally.
+// Matches are always exact; we never return "the first result" for a number or
+// phone that didn't match, because that leaks somebody else's order.
+
+const digitsOnly = (v: any) => String(v ?? '').replace(/\D/g, '');
+
+/** Accepts 1676, "1676", "#1676", "order 1676" → 1676. */
+export function normalizeOrderNumber(input: any): number | null {
+  const d = digitsOnly(input);
+  if (!d) return null;
+  const n = parseInt(d.slice(0, 12), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** True when both phones end with the same 8 significant digits. */
+export function phoneMatches(a: string, b: string): boolean {
+  const x = digitsOnly(a);
+  const y = digitsOnly(b);
+  if (x.length < 7 || y.length < 7) return false;
+  const n = Math.min(8, x.length, y.length);
+  return x.slice(-n) === y.slice(-n);
+}
+
+function formatShopifyOrder(so: any): string {
+  let info = `Shopify Order ${so.name}\nCustomer: ${[so.customer?.first_name, so.customer?.last_name].filter(Boolean).join(' ') || 'n/a'}\nPhone: ${so.customer?.phone || so.shipping_address?.phone || 'n/a'}\nPayment: ${so.financial_status || 'n/a'}\nFulfillment: ${so.fulfillment_status || 'unfulfilled'}\nTotal: $${so.total_price}\nCreated: ${so.created_at}`;
+  const items = (so.line_items || []).map((li: any) => `${li.quantity}x ${li.title}`).join(', ');
+  if (items) info += `\nItems: ${items}`;
+  if (so.shipping_address) {
+    info += `\nAddress: ${[so.shipping_address.address1, so.shipping_address.city].filter(Boolean).join(', ')}`;
+  }
+  for (const f of (so.fulfillments || [])) {
+    info += `\nShipment: ${f.status}`;
+    if (f.tracking_number) info += ` | Tracking: ${f.tracking_number}`;
+    if (f.tracking_url) info += ` | URL: ${f.tracking_url}`;
+    if (f.tracking_company) info += ` (${f.tracking_company})`;
+  }
+  if (so.cancelled_at) info += `\nCancelled: ${so.cancelled_at}`;
+  return info;
+}
+
+const SHOPIFY_ORDER_FIELDS =
+  'id,name,order_number,financial_status,fulfillment_status,fulfillments,total_price,created_at,cancelled_at,line_items,customer,shipping_address,billing_address';
+
+async function getOrderInfo(
+  supabase: any,
+  displayIdRaw: number | string | undefined,
+  tenantId: string,
+  customerPhoneRaw?: string,
+  contactPhone?: string,
+  contactId?: string,
+): Promise<{ success: boolean; info?: string; error?: string }> {
   try {
-    // Helper to fetch Shopify creds
+    const displayId = normalizeOrderNumber(displayIdRaw);
+    // The model sometimes omits or garbles the phone — the WhatsApp sender is
+    // always the authoritative fallback.
+    const phoneCandidates = [customerPhoneRaw, contactPhone]
+      .map((p) => digitsOnly(p))
+      .filter((p) => p.length >= 7);
+
     const getShopifyCreds = async () => {
       if (!tenantId) return null;
       const { data: cred } = await supabase
@@ -1351,177 +1612,177 @@ async function getOrderInfo(supabase: any, displayId: number | undefined, tenant
         .maybeSingle();
       return (cred?.access_token && cred?.shop_domain) ? cred : null;
     };
+    const cred = await getShopifyCreds();
+    const shopifyGet = async (path: string) => {
+      const res = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/${path}`, {
+        headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) { await res.text(); return null; }
+      return await res.json();
+    };
 
-    // Helper to enrich order with Shopify details
+    // Local row rendered with any Shopify detail we can attach.
     const enrichWithShopify = async (order: any) => {
-      let info = `Order #${order.display_id}\nCustomer: ${order.customer_name}\nPhone: ${order.customer_phone}\nAddress: ${order.customer_address}\nItems: ${order.product_name} (×${order.quantity})\nStatus: ${order.status}\nDelivery Fee: $${parseFloat(order.delivery_fee || 3).toFixed(2)}\nCreated: ${order.created_at}`;
-
-      if (order.shopify_order_id && tenantId) {
+      let info = `Order #${order.display_id}\nCustomer: ${order.customer_name}\nPhone: ${order.customer_phone}\nAddress: ${order.customer_address}\nItems: ${order.product_name} (×${order.quantity})\nStatus: ${order.status}\nDelivery Fee: $${parseFloat(order.delivery_fee ?? 3).toFixed(2)}\nCreated: ${order.created_at}`;
+      if (order.shopify_order_id && cred) {
         try {
-          const cred = await getShopifyCreds();
-          if (cred) {
-            const res = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/orders/${order.shopify_order_id}.json?fields=name,financial_status,fulfillment_status,fulfillments,total_price,created_at,cancelled_at`, {
-              headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
-            });
-            if (res.ok) {
-              const so = (await res.json()).order;
-              if (so) {
-                info += `\n\n--- Shopify Details ---\nShopify Order: ${so.name}\nPayment: ${so.financial_status}\nFulfillment: ${so.fulfillment_status || 'unfulfilled'}\nTotal: $${so.total_price}`;
-                for (const f of (so.fulfillments || [])) {
-                  info += `\nShipment: ${f.status}`;
-                  if (f.tracking_number) info += ` | Tracking: ${f.tracking_number}`;
-                  if (f.tracking_url) info += ` | URL: ${f.tracking_url}`;
-                  if (f.tracking_company) info += ` (${f.tracking_company})`;
-                }
-                if (so.cancelled_at) info += `\nCancelled: ${so.cancelled_at}`;
-              }
-            } else { await res.text(); }
-          }
+          const data = await shopifyGet(`orders/${order.shopify_order_id}.json?fields=${SHOPIFY_ORDER_FIELDS}`);
+          const so = data?.order;
+          if (so) info += `\n\n--- Live store details ---\n${formatShopifyOrder(so)}`;
         } catch (e) { console.error('Shopify detail fetch error:', e); }
       }
       return info;
     };
 
-    // CASE 1: Lookup by display_id
-    if (displayId) {
-      let query = supabase.from('orders').select('*').eq('display_id', displayId);
-      if (tenantId) query = query.eq('tenant_id', tenantId);
-      const { data: order } = await query.maybeSingle();
+    const findLocalByNumber = async (n: number) => {
+      let q = supabase.from('orders').select('*').eq('display_id', n);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { data } = await q.limit(1);
+      return (data || [])[0] || null;
+    };
 
-      if (order) {
-        const info = await enrichWithShopify(order);
-        return { success: true, info };
-      }
-
-      // Not found locally — try Shopify by order name (try with and without #)
-      const cred = await getShopifyCreds();
-      if (cred) {
+    const findShopifyByNumber = async (n: number) => {
+      if (!cred) return null;
+      for (const nv of [`#${n}`, String(n)]) {
         try {
-          const nameVariants = [`%23${displayId}`, `${displayId}`];
-          let so: any = null;
-          for (const nv of nameVariants) {
-            const res = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/orders.json?name=${nv}&status=any&limit=5`, {
-              headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              // Match exact order_number too (handles store prefixes like "JAW1234")
-              // ONLY accept exact matches — never a fuzzy "first result" fallback,
-              // otherwise a wrong order number silently resolves to somebody else's order.
-              so = (data.orders || []).find((o: any) => String(o.order_number) === String(displayId) || o.name === `#${displayId}` || o.name === String(displayId)) || null;
-              if (so) break;
-            } else { await res.text(); }
-          }
-          if (so) {
-            let info = `Shopify Order ${so.name}\nCustomer: ${so.customer?.first_name || ''} ${so.customer?.last_name || ''}\nPayment: ${so.financial_status}\nFulfillment: ${so.fulfillment_status || 'unfulfilled'}\nTotal: $${so.total_price}\nCreated: ${so.created_at}`;
-            const items = (so.line_items || []).map((li: any) => `${li.quantity}x ${li.title}`).join(', ');
-            if (items) info += `\nItems: ${items}`;
-            if (so.shipping_address) info += `\nAddress: ${so.shipping_address.address1 || ''}, ${so.shipping_address.city || ''}`;
-            for (const f of (so.fulfillments || [])) {
-              info += `\nShipment: ${f.status}`;
-              if (f.tracking_number) info += ` | Tracking: ${f.tracking_number}`;
-              if (f.tracking_url) info += ` | URL: ${f.tracking_url}`;
-              if (f.tracking_company) info += ` (${f.tracking_company})`;
-            }
-            if (so.cancelled_at) info += `\nCancelled: ${so.cancelled_at}`;
-            return { success: true, info };
-          }
+          const data = await shopifyGet(
+            `orders.json?name=${encodeURIComponent(nv)}&status=any&limit=10&fields=${SHOPIFY_ORDER_FIELDS}`,
+          );
+          // Exact match only — a wrong number must never resolve to another order.
+          const so = (data?.orders || []).find((o: any) =>
+            String(o.order_number) === String(n) || o.name === `#${n}` || o.name === String(n)
+          );
+          if (so) return so;
         } catch (e) { console.error('Shopify order search error:', e); }
       }
+      return null;
+    };
 
-      return { success: false, error: `Order #${displayId} not found in our system or Shopify` };
-    }
+    // ---- CASE 1: customer gave an order number ----
+    if (displayId) {
+      // Our own tenant-scoped row first. Store order numbers and our local
+      // display_id sequence overlap, so hitting Shopify first could read back a
+      // different shopper's order.
+      const local = await findLocalByNumber(displayId);
+      if (local) return { success: true, info: await enrichWithShopify(local) };
 
-    // CASE 2: Lookup by phone number (find recent orders for this customer)
-    if (customerPhone) {
-      const cleanPhone = customerPhone.replace(/\D/g, '');
-      
-      // Search local DB first
-      let query = supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(5);
-      if (tenantId) query = query.eq('tenant_id', tenantId);
-      // Match phone with or without country code
-      query = query.or(`customer_phone.eq.${cleanPhone},customer_phone.ilike.%${cleanPhone.slice(-8)}%`);
-      const { data: localOrders } = await query;
-
-      if (localOrders && localOrders.length > 0) {
-        const infos = await Promise.all(localOrders.map(enrichWithShopify));
-        return { success: true, info: `Found ${localOrders.length} order(s) for this customer:\n\n${infos.join('\n\n---\n\n')}` };
-      }
-
-      // Try Shopify search by phone
-      const cred = await getShopifyCreds();
       if (cred) {
-        try {
-          const tail = cleanPhone.slice(-8);
-          // 1. Find customer by phone via Shopify search
-          const phoneVariants = [
-            cleanPhone,
-            `+${cleanPhone}`,
-            cleanPhone.startsWith('961') ? `+${cleanPhone}` : `+961${cleanPhone.replace(/^0/, '')}`,
-          ];
-          let customerId: string | null = null;
-          for (const pv of phoneVariants) {
-            const cRes = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/customers/search.json?query=${encodeURIComponent('phone:' + pv)}&limit=5`, {
-              headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
-            });
-            if (cRes.ok) {
-              const cData = await cRes.json();
-              const cust = (cData.customers || [])[0];
-              if (cust?.id) { customerId = String(cust.id); break; }
-            } else { await cRes.text(); }
-          }
-
-          let matching: any[] = [];
-          if (customerId) {
-            // 2. Fetch all orders for that customer
-            const oRes = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/orders.json?customer_id=${customerId}&status=any&limit=10`, {
-              headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
-            });
-            if (oRes.ok) {
-              const oData = await oRes.json();
-              matching = oData.orders || [];
-            } else { await oRes.text(); }
-          }
-
-          // 3. Fallback: scan recent 50 orders and filter by phone tail
-          if (matching.length === 0) {
-            const res = await fetch(`https://${cred.shop_domain}/admin/api/2026-01/orders.json?status=any&limit=50`, {
-              headers: { 'X-Shopify-Access-Token': cred.access_token, 'Content-Type': 'application/json' },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              matching = (data.orders || []).filter((o: any) => {
-                const orderPhone = (o.customer?.phone || o.shipping_address?.phone || o.billing_address?.phone || '').replace(/\D/g, '');
-                return orderPhone && (orderPhone.endsWith(tail) || tail.endsWith(orderPhone.slice(-8)));
-              });
-            } else { await res.text(); }
-          }
-
-          if (matching.length > 0) {
-            const infos = matching.slice(0, 5).map((so: any) => {
-              let info = `Shopify Order ${so.name}\nCustomer: ${so.customer?.first_name || ''} ${so.customer?.last_name || ''}\nPayment: ${so.financial_status}\nFulfillment: ${so.fulfillment_status || 'unfulfilled'}\nTotal: $${so.total_price}\nCreated: ${so.created_at}`;
-              const items = (so.line_items || []).map((li: any) => `${li.quantity}x ${li.title}`).join(', ');
-              if (items) info += `\nItems: ${items}`;
-              for (const f of (so.fulfillments || [])) {
-                info += `\nShipment: ${f.status}`;
-                if (f.tracking_number) info += ` | Tracking: ${f.tracking_number}`;
-                if (f.tracking_url) info += ` | URL: ${f.tracking_url}`;
-              }
-              return info;
-            });
-            return { success: true, info: `Found ${matching.length} Shopify order(s):\n\n${infos.join('\n\n---\n\n')}` };
-          }
-        } catch (e) { console.error('Shopify phone search error:', e); }
+        const so = await findShopifyByNumber(displayId);
+        // Never disclose an order that does not belong to the person asking.
+        const belongsToCaller = !so || phoneCandidates.length === 0 ||
+          phoneCandidates.some((p) =>
+            phoneMatches(so.customer?.phone || '', p) ||
+            phoneMatches(so.shipping_address?.phone || '', p) ||
+            phoneMatches(so.billing_address?.phone || '', p)
+          );
+        if (so && belongsToCaller) return { success: true, info: formatShopifyOrder(so) };
       }
 
-      return { success: false, error: `No orders found for phone ${customerPhone}` };
+
+      // Before declaring it missing, try this customer's own orders — people
+      // often quote a receipt/reference number that isn't the order number.
+      if (phoneCandidates.length > 0 || contactId) {
+        const own = await findLocalForCustomer();
+        if (own.length > 0) {
+          const infos = await Promise.all(own.slice(0, 3).map(enrichWithShopify));
+          return {
+            success: true,
+            info: `No order numbered #${displayId} exists. These are the orders on this customer's phone number — confirm with them which one they mean before answering:\n\n${infos.join('\n\n---\n\n')}`,
+          };
+        }
+      }
+      return {
+        success: false,
+        error: `No order #${displayId} exists${cred ? ' in the store or on our platform' : ' on our platform'}, and this customer has no orders on their phone number`,
+      };
     }
 
-    return { success: false, error: 'Please provide an order number or phone number to look up' };
+    // ---- CASE 2: no number — look up this customer's orders ----
+    async function findLocalForCustomer(): Promise<any[]> {
+      const rows: any[] = [];
+      const push = (list: any[]) => {
+        for (const r of list || []) if (!rows.some((x) => x.id === r.id)) rows.push(r);
+      };
+      if (contactId) {
+        let q = supabase.from('orders').select('*').eq('contact_id', contactId)
+          .order('created_at', { ascending: false }).limit(5);
+        if (tenantId) q = q.eq('tenant_id', tenantId);
+        const { data } = await q;
+        push(data || []);
+      }
+      // Phone fallback, verified in code so a partial LIKE can't return
+      // another customer's order.
+      for (const phone of phoneCandidates) {
+        let q = supabase.from('orders').select('*')
+          .ilike('customer_phone', `%${phone.slice(-8)}%`)
+          .order('created_at', { ascending: false }).limit(10);
+        if (tenantId) q = q.eq('tenant_id', tenantId);
+        const { data } = await q;
+        push((data || []).filter((o: any) => phoneMatches(o.customer_phone, phone)));
+      }
+      return rows;
+    }
+
+    const findShopifyForCustomer = async (): Promise<any[]> => {
+      if (!cred) return [];
+      for (const phone of phoneCandidates) {
+        const variants = Array.from(new Set([phone, `+${phone}`, phone.replace(/^0+/, '')]));
+        for (const pv of variants) {
+          try {
+            const cData = await shopifyGet(
+              `customers/search.json?query=${encodeURIComponent('phone:' + pv)}&limit=5`,
+            );
+            const cust = (cData?.customers || []).find((c: any) => phoneMatches(c.phone || '', phone));
+            if (!cust?.id) continue;
+            const oData = await shopifyGet(
+              `orders.json?customer_id=${cust.id}&status=any&limit=10&fields=${SHOPIFY_ORDER_FIELDS}`,
+            );
+            const orders = oData?.orders || [];
+            if (orders.length > 0) return orders;
+          } catch (e) { console.error('Shopify phone search error:', e); }
+        }
+      }
+      // Guest checkouts have no customer profile, and the phone is often only on
+      // the shipping/billing address. Scan recent orders as a second stage.
+      try {
+        const oData = await shopifyGet(
+          `orders.json?status=any&limit=100&fields=${SHOPIFY_ORDER_FIELDS}`,
+        );
+        const matched = (oData?.orders || []).filter((o: any) =>
+          phoneCandidates.some((p) =>
+            phoneMatches(o.customer?.phone || '', p) ||
+            phoneMatches(o.shipping_address?.phone || '', p) ||
+            phoneMatches(o.billing_address?.phone || '', p)
+          )
+        );
+        if (matched.length > 0) return matched;
+      } catch (e) { console.error('Shopify order phone scan error:', e); }
+      return [];
+    };
+
+    if (phoneCandidates.length > 0 || contactId) {
+      if (cred) {
+        const shopifyOrders = await findShopifyForCustomer();
+        if (shopifyOrders.length > 0) {
+          const infos = shopifyOrders.slice(0, 5).map(formatShopifyOrder);
+          return { success: true, info: `Found ${shopifyOrders.length} store order(s) for this customer:\n\n${infos.join('\n\n---\n\n')}` };
+        }
+      }
+      const local = await findLocalForCustomer();
+      if (local.length > 0) {
+        const infos = await Promise.all(local.slice(0, 5).map(enrichWithShopify));
+        return { success: true, info: `Found ${local.length} order(s) for this customer:\n\n${infos.join('\n\n---\n\n')}` };
+      }
+      return { success: false, error: 'This customer has no orders on record — ask them for their order number' };
+    }
+
+    return { success: false, error: 'Please provide an order number to look up' };
   } catch (err) {
+    console.error('getOrderInfo failed:', err);
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
 }
+
 
 // ===== Outbound price sanitizer =====
 // Prices are stripped out of stale (non-catalog) context with a placeholder so
@@ -1660,13 +1921,62 @@ async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, t
   }
 }
 
-async function sendWhatsAppImage(phoneNumberId: string, accessToken: string, to: string, imageUrl: string, caption?: string): Promise<boolean> {
+type WhatsAppImageResult = { ok: boolean; messageId?: string };
+
+function whatsappSafeShopifyImageUrl(imageUrl: string): string {
   try {
+    const url = new URL(imageUrl);
+    if (url.hostname !== 'cdn.shopify.com') return imageUrl;
+    // Shopify performs a real server-side conversion. This avoids Meta accepting
+    // the upload and later rejecting valid-looking PNGs with error 131053.
+    url.searchParams.set('width', '1600');
+    url.searchParams.set('format', 'jpg');
+    return url.toString();
+  } catch {
+    return imageUrl;
+  }
+}
+
+async function sendWhatsAppImage(phoneNumberId: string, accessToken: string, to: string, imageUrl: string, caption?: string): Promise<WhatsAppImageResult> {
+  try {
+    // Shopify's image endpoint converts catalog photos to a conservative JPEG.
+    // Upload those exact bytes; do not fall back to an unverified link because
+    // Meta can accept the request and reject the media asynchronously afterward.
+    const safeImageUrl = whatsappSafeShopifyImageUrl(imageUrl);
+    let image: any = null;
+    try {
+      const dl = await fetch(safeImageUrl, { headers: { Accept: 'image/jpeg,image/png' } });
+      if (dl.ok) {
+        let mime = (dl.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+        if (!['image/jpeg', 'image/png'].includes(mime)) mime = 'image/jpeg';
+        const bytes = new Uint8Array(await dl.arrayBuffer());
+        const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+        const isPng = bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+        if (!isJpeg && !isPng) throw new Error('downloaded file is not a JPEG or PNG');
+        mime = isJpeg ? 'image/jpeg' : 'image/png';
+        const form = new FormData();
+        form.append('messaging_product', 'whatsapp');
+        form.append('type', mime);
+        form.append('file', new Blob([bytes], { type: mime }), mime === 'image/png' ? 'photo.png' : 'photo.jpg');
+        const up = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/media`, {
+          method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form,
+        });
+        const uj = await up.json().catch(() => ({}));
+        if (up.ok && uj?.id) {
+          image = { id: uj.id };
+          console.log(`Image uploaded to WhatsApp as ${mime}:`, uj.id);
+        } else {
+          console.error('Image upload to WhatsApp failed:', up.status, uj);
+        }
+      } else console.error('Image download failed', dl.status, safeImageUrl);
+    } catch (e) { console.error('Image preparation/upload error:', (e as Error).message); }
+
+    if (!image) return { ok: false };
     const body: any = {
       messaging_product: 'whatsapp',
       to,
       type: 'image',
-      image: { link: imageUrl },
+      image,
     };
     if (caption) body.image.caption = caption;
 
@@ -1685,13 +1995,14 @@ async function sendWhatsAppImage(phoneNumberId: string, accessToken: string, to:
     const result = await response.json();
     if (!response.ok) {
       console.error('WhatsApp image API error:', result);
-      return false;
+      return { ok: false };
     }
-    console.log('WhatsApp image sent:', result.messages?.[0]?.id);
-    return true;
+    const messageId = result.messages?.[0]?.id;
+    console.log('WhatsApp image sent:', messageId);
+    return { ok: true, messageId };
   } catch (error) {
     console.error('Error sending WhatsApp image:', error);
-    return false;
+    return { ok: false };
   }
 }
 
@@ -2576,6 +2887,15 @@ serve(async (req) => {
         return new Response('OK', { status: 200, headers: corsHeaders });
       }
 
+      // ===== ONLINE PAYMENT BUTTONS (any vertical) =====
+      if (tenantId && interactiveReplyId && /^pay_(online|cash)\|/.test(interactiveReplyId)) {
+        await handlePaymentReply({
+          supabase, tenantId, contactId: contact.id, phoneNumber,
+          phoneNumberId: tenantPhoneNumberId!, accessToken: tenantAccessToken!,
+        }, interactiveReplyId);
+        return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+
       // ===== VERTICAL ROUTER =====
       // Restaurant tenants run an isolated flow. E-commerce code below is untouched.
       if (tenantId) {
@@ -2610,6 +2930,12 @@ serve(async (req) => {
             if (cRow?.ai_enabled === false) {
               return new Response('OK', { status: 200, headers: corsHeaders });
             }
+            if (!interactiveReplyId && await tryQuickAnswer({
+              supabase, tenantId, contactId: contact.id, phoneNumber,
+              phoneNumberId: tenantPhoneNumberId!, accessToken: tenantAccessToken!, messageText: messageText || null,
+            })) {
+              return new Response('OK', { status: 200, headers: corsHeaders });
+            }
             const flowOpts = {
               supabase, tenantId, contact, phoneNumber,
               tenantPhoneNumberId: tenantPhoneNumberId!,
@@ -2619,7 +2945,8 @@ serve(async (req) => {
             };
             if (v === 'restaurant') await runRestaurantFlow(flowOpts);
             else if (v === 'real_estate') await runRealEstateFlow(flowOpts);
-            else if (v === 'wellness' || v === 'service') await runWellnessFlow(flowOpts);
+            else if (v === 'wellness') await runWellnessFlow(flowOpts);
+            else if (v === 'service') await runServiceFlow(flowOpts);
             else if (v === 'healthcare') await runHealthcareFlow(flowOpts);
             else await runEducationFlow(flowOpts);
             return new Response('OK', { status: 200, headers: corsHeaders });
@@ -2665,6 +2992,15 @@ serve(async (req) => {
       }
       // ===== END AI OFF SWITCHES =====
 
+      // ===== QUICK ANSWERS (Settings) =====
+      if (tenantId && !interactiveReplyId && await tryQuickAnswer({
+        supabase, tenantId, contactId: contact.id, phoneNumber,
+        phoneNumberId: tenantPhoneNumberId!, accessToken: tenantAccessToken!, messageText: messageText || null,
+      })) {
+        return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+
+
 
 
       // ===== GUIDED ORDER FLOW (deterministic state machine) =====
@@ -2708,6 +3044,28 @@ serve(async (req) => {
         }
       }
       console.log('upsell enabled for tenant', tenantId, '=', upsellEnabled);
+
+      // Product options (sizes / colors) switch — Settings → AI Auto-Replies.
+      let variantsEnabled = false;
+      let variantSizes = '';
+      let variantColors = '';
+      if (tenantId) {
+        try {
+          const { data: vRows } = await supabase
+            .from('app_settings')
+            .select('key, value')
+            .eq('tenant_id', tenantId)
+            .in('key', ['product_variants_enabled', 'product_variant_sizes', 'product_variant_colors']);
+          const vPick = (k: string) => (vRows || []).find((r: any) => r.key === k)?.value;
+          const vText = (v: any) => (typeof v === 'string' ? v.replace(/^"|"$/g, '') : v ? String(v) : '');
+          const rawV = vPick('product_variants_enabled');
+          variantsEnabled = rawV === true || rawV === 'true';
+          variantSizes = vText(vPick('product_variant_sizes'));
+          variantColors = vText(vPick('product_variant_colors'));
+        } catch (e) {
+          console.error('variant setting fetch failed', e);
+        }
+      }
 
 
 
@@ -3108,6 +3466,16 @@ serve(async (req) => {
         }
       }
 
+      // Gemini rejects any request whose final turn is the assistant
+      // ("Requests ending with a model turn are not supported" → HTTP 400, bot
+      // goes silent). Outgoing rows can be stored with a timestamp after the
+      // incoming message (order-flow prompts, template sends), so the coalesced
+      // history sometimes ends on an assistant turn. Force a trailing user turn.
+      const tail = conversationHistory[conversationHistory.length - 1];
+      if (!tail || tail.role !== 'user') {
+        conversationHistory.push({ role: 'user', content: messageText || '[Image]' });
+      }
+
       // If current message includes an image, attach it as multimodal content to the last user turn
       if (incomingImageBase64) {
         const lastUserIdx = (() => {
@@ -3131,11 +3499,13 @@ serve(async (req) => {
       }
 
 
+
       const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
       if (!LOVABLE_API_KEY) throw new Error('AI service not configured');
 
       // Build tools array
       const tools: any[] = [START_ORDER_FLOW_TOOL, UPDATE_ORDER_STATUS_TOOL, UPDATE_ORDER_DETAILS_TOOL, TRANSFER_TO_HUMAN_TOOL, SEND_IMAGE_TOOL, GET_ORDER_INFO_TOOL, TAG_CONTACT_TOOL];
+      if (await getShopifyCred(supabase, tenantId)) tools.push(SEARCH_PRODUCTS_TOOL);
 
       const currentTags: string[] = Array.isArray(contact.tags) ? contact.tags : [];
       const taggingContext = `\n\n## CRM Tagging\nCurrent tags on this contact: ${currentTags.length ? currentTags.join(', ') : '(none)'}.\nWhenever you learn something useful about who this customer is or what they want (interests, language, location, lead quality, complaints, VIP, repeat buyer, wholesale, etc.), call tag_contact to add concise lowercase kebab-case tags. Avoid duplicates and avoid tagging trivial/transient things. Never mention tagging to the customer.`;
@@ -3235,7 +3605,14 @@ serve(async (req) => {
       } catch (e) { console.error('reply language fetch failed', e); }
 
       const _answerDirective = `\n\n## ANSWER THE EXACT QUESTION\nAlways answer the SPECIFIC question the customer asked. If they ask price, give the price. If they ask stock, give stock. If they ask color, give color. Do NOT pivot to a different attribute (e.g. answering "out of stock" when they asked the price). If the item is out of stock, still answer the question first (price/color/etc.), then add the stock note in the same reply.\n\n## USE THE KNOWLEDGE BASE — DO NOT REFUSE EASILY\nThe BUSINESS INFORMATION above (product descriptions, prices, variants, FAQs, additional info, tags) IS your source of truth. ALWAYS answer from it when the info is there, even if phrased differently than the customer's question (paraphrasing and reasonable inference from the description is fine and expected). Price, stock, colors, sizes, materials, what's in the box, how to use, care instructions, warranty, shipping — if it's in the knowledge base in any form, answer it directly.\n\nONLY reply "I don't have that detail — want me to check with the team?" (mirror the customer's language) when the knowledge base genuinely says NOTHING about the topic. Do NOT use that fallback when the answer is in the description or FAQ — read carefully before refusing.\n\nNEVER fabricate specific performance numbers, durations, distances, or behaviour claims (e.g. "lasts 8 hours", "works in heavy rain", "100m range", "stays bright on cloudy days") if the knowledge base does not state them. No hedging like "might", "may vary", "could be" — either it's stated in the KB or you don't know.`;
-      const fullSystemPrompt = systemPrompt + taggingContext + campaignContext + pricingContext + _answerDirective + (_langDirective ? '\n\n' + _langDirective : '') + _upsellDirective;
+      // Sizes / colors directive (Settings → "My products have sizes & colors").
+      let _variantDirective = '';
+      if (variantsEnabled) {
+        const _generalSizes = variantSizes ? `\nSizes this business usually carries (general guide only): ${variantSizes}.` : '';
+        const _generalColors = variantColors ? `\nColors this business usually carries (general guide only): ${variantColors}.` : '';
+        _variantDirective = `\n\n## SIZES & COLORS — REQUIRED (OVERRIDES THE ONE-SENTENCE LIMIT)\nThis business sells products that come in different sizes and/or colors. The knowledge base lists them per product (look at the "Variants", "Available sizes", "Available colors" lines, and variant titles like "Black / 42").\nRules:\n1. When a customer asks about a product, or shows interest in it, state the available sizes and/or colors for THAT product in the same reply (you may use TWO short sentences for this).\n2. If they ask "what sizes do you have?" or "what colors?", list ONLY the options written for that product in the knowledge base — exactly as written.\n3. Before confirming ANY order for a product that has more than one size or color, you MUST ask the customer which size and which color they want, and include their answer in the order.\n4. Only offer options that are marked available/in stock. If an option is out of stock, say so and offer the available ones instead.\n5. NEVER invent a size or a color that is not in the knowledge base for that product. If the product's options are not listed, say you'll check with the team.${_generalSizes}${_generalColors}`;
+      }
+      const fullSystemPrompt = systemPrompt + taggingContext + campaignContext + pricingContext + _answerDirective + (_langDirective ? '\n\n' + _langDirective : '') + _upsellDirective + _variantDirective;
 
       const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
@@ -3324,6 +3701,8 @@ serve(async (req) => {
       
       // Handle tool calls
       if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+        const toolMessages: any[] = [];
+        let lastToolResponse = '';
         for (const toolCall of aiMessage.tool_calls) {
           let args;
           try {
@@ -3332,13 +3711,76 @@ serve(async (req) => {
 
           let toolResponse = '';
 
-          if (toolCall.function.name === 'send_image') {
+          if (toolCall.function.name === 'search_products') {
+            try {
+              const cred = await getShopifyCred(supabase, tenantId);
+              const q = String(args.query || '').trim();
+              if (!cred || !q) {
+                toolResponse = 'Search unavailable. Use the knowledge above.';
+              } else {
+                const products = (await matchProductCandidates(cred, q)).filter((p) => p.status !== 'draft').slice(0, 6);
+                if (!products.length) {
+                  toolResponse = `No products found for "${q}". Ask the customer for another name or model; do not invent products.`;
+                } else {
+                  const lines: string[] = [];
+                  for (const p of products) {
+                    const prices = [...new Set(p.variants.map((v) => v.price).filter(Boolean))];
+                    const avail = p.variants.filter((v) => v.available !== false);
+                    const titles = avail.map((v) => v.title).filter((t) => t && t !== 'Default Title');
+                    if (p.images[0]?.src && !availableImageGroups[p.title]) {
+                      availableImageGroups[p.title] = p.images.slice(0, 10).map((im) => ({ image_url: im.src, description: `${p.title} [shopify:${p.id}:${im.id}]` }));
+                    }
+                    // Colors come from the live product options so color questions
+                    // are answered here and never handed to a person.
+                    const colors = lines.length < 4 && p.id ? await fetchProductColors(cred, String(p.id)) : [];
+                    lines.push(`- ${p.title} | price: ${prices.join(' / ') || 'ask team'} | in-stock variants: ${titles.slice(0, 30).join(', ') || (avail.length ? 'yes' : 'OUT OF STOCK')}${colors.length ? ` | colors: ${colors.slice(0, 12).join(', ')}` : ''} | image label: "${p.title}"`);
+                  }
+                  toolResponse = 'SEARCH RESULTS (live store, authoritative):\n' + lines.join('\n') + '\nUse these exact titles as image_label for send_image. When a "colors:" list is present, answer color questions from it directly — never say the team will confirm the colors. For photos of a multi-color product without a chosen color, call send_image with all_colors=true; when the customer names a color, call send_image with that color.';
+                }
+              }
+            } catch (e) {
+              console.error('search_products failed', e);
+              toolResponse = 'Search failed. Use the knowledge above.';
+            }
+          } else if (toolCall.function.name === 'send_image') {
             // Large catalogs cannot be held in the prompt, so look the requested
             // product's photos up live before concluding there are none.
+            let wanted = String(args.image_label || '');
             if (tenantId && args.image_label) {
-              const wanted = String(args.image_label);
+              const contextualQuery = recentProductQuery(conversationHistory, messageText || '');
+              if (args.color && contextualQuery) {
+                try {
+                  const cred = await getShopifyCred(supabase, tenantId);
+                  const contextualProducts = cred ? (await matchProductCandidates(cred, contextualQuery)).filter((p) => p.status !== 'draft') : [];
+                  const chosen = String(args.color).trim().toLowerCase();
+                  for (const p of contextualProducts.slice(0, 8)) {
+                    if (!p.id) continue;
+                    const colorImages = await fetchColorImages(cred, String(p.id));
+                    const hit = colorImages.find((ci) => ci.color.toLowerCase() === chosen || ci.color.toLowerCase().includes(chosen) || chosen.includes(ci.color.toLowerCase()));
+                    if (!hit) continue;
+                    wanted = p.title;
+                    availableImageGroups[p.title] = p.images.slice(0, 10).map((im) => ({ image_url: im.src, description: `${p.title} [shopify:${p.id}:${im.id}]` }));
+                    if (!availableImageGroups[p.title].length) {
+                      availableImageGroups[p.title] = [{ image_url: hit.src, description: `${p.title} [shopify:${p.id}:${hit.imageId}]` }];
+                    }
+                    console.log('Resolved color photo from recent product context:', contextualQuery, '→', p.title, chosen);
+                    break;
+                  }
+                } catch (e) { console.error('Contextual color image lookup failed', e); }
+              }
+              // Shopify stores: photos are never stored — always fetch live from the store.
+              const shopCred = await getShopifyCred(supabase, tenantId).catch(() => null);
+              if (shopCred && !findBestImageLabel(availableImageGroups, wanted)) {
+                try {
+                  const live = (await matchProductCandidates(shopCred, wanted)).filter((p) => p.status !== 'draft' && p.images?.[0]?.src);
+                  for (const p of live.slice(0, 3)) {
+                    availableImageGroups[p.title] = p.images.slice(0, 10).map((im) => ({ image_url: im.src, description: `${p.title} [shopify:${p.id}:${im.id}]` }));
+                  }
+                  if (live.length) console.log('Live Shopify photo lookup', live.length, 'for', wanted);
+                } catch (e) { console.error('Live Shopify photo lookup failed', e); }
+              }
               const alreadyMatched = findBestImageLabel(availableImageGroups, wanted);
-              if (!alreadyMatched) {
+              if (!alreadyMatched && !shopCred) {
                 const words = wanted
                   .replace(/[^\p{L}\p{N}.]+/gu, ' ')
                   .split(/\s+/)
@@ -3362,6 +3804,21 @@ serve(async (req) => {
                   availableImageGroups[img.label].push({ image_url: img.image_url, description: img.description });
                 }
                 if (found?.length) console.log('Lazy image lookup found', found.length, 'photos for', wanted);
+                // Still nothing: look the product up live in the store and use its photos.
+                if (!findBestImageLabel(availableImageGroups, wanted)) {
+                  try {
+                    const cred = await getShopifyCred(supabase, tenantId);
+                    if (cred) {
+                      const live = (await matchProductCandidates(cred, wanted)).filter((p) => p.status !== 'draft' && p.images?.[0]?.src);
+                      for (const p of live.slice(0, 3)) {
+                        if (!availableImageGroups[p.title]) {
+                          availableImageGroups[p.title] = p.images.slice(0, 10).map((im) => ({ image_url: im.src, description: `${p.title} [shopify:${p.id}:${im.id}]` }));
+                        }
+                      }
+                      if (live.length) console.log('Live store image lookup found', live.length, 'products for', wanted);
+                    }
+                  } catch (e) { console.error('Live image lookup failed', e); }
+                }
               }
             }
 
@@ -3369,7 +3826,7 @@ serve(async (req) => {
               toolResponse = `No images are configured yet. Tell the customer you don't have photos available right now and describe the product instead.`;
             } else {
             // Find matching image group (fuzzy match), preferring WhatsApp-compatible images
-            const matchedLabel = findBestImageLabel(availableImageGroups, args.image_label);
+            const matchedLabel = findBestImageLabel(availableImageGroups, wanted);
 
             if (matchedLabel) {
               const imageGroup = getSendableImages(availableImageGroups[matchedLabel]);
@@ -3390,27 +3847,57 @@ serve(async (req) => {
                 .order('created_at', { ascending: true });
 
               const sentUrls = (sentImages || []).map((m: any) => m.media_url);
+              if (args.all_colors) {
+                const cred = await getShopifyCred(supabase, tenantId);
+                const pid = availableImageGroups[matchedLabel].map((g) => String(g.description || '').match(/\[shopify:(\d+):\d+\]/)?.[1]).find(Boolean);
+                const colorImgs = cred && pid ? (await fetchColorImages(cred, pid)).filter((c) => !isUnsupportedWhatsAppImageUrl(c.src)).slice(0, 8) : [];
+                if (colorImgs.length > 0) {
+                  const sentColors: string[] = [];
+                  for (const ci of colorImgs) {
+                    const local = availableImageGroups[matchedLabel].find((g) => String(g.description || '').includes(`:${ci.imageId}]`));
+                    const url = local?.image_url || ci.src;
+                    const sendResult = await sendWhatsAppImage(usedPhoneNumberId, usedAccessToken, phoneNumber, url, `${matchedLabel} — ${ci.color}`);
+                    if (!sendResult.ok) continue;
+                    imageSent = true;
+                    sentColors.push(ci.color);
+                    await supabase.from('messages').insert({
+                      contact_id: contact.id, content: `📷 ${matchedLabel} — ${ci.color}`,
+                      direction: 'outgoing', status: 'sent', media_url: url,
+                      media_type: url.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg',
+                      twilio_sid: sendResult.messageId,
+                    });
+                  }
+                  toolResponse = sentColors.length
+                    ? `Sent photos of these colors: ${sentColors.join(', ')}. Ask in one short sentence which color they like.`
+                    : `Failed to send photos of "${matchedLabel}".`;
+                  toolMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResponse });
+                  lastToolResponse = toolResponse;
+                  continue;
+                }
+              }
               // When the customer picked a color, prefer a photo whose description
               // or URL mentions it; otherwise fall back to the normal rotation.
               const chosenColor = String(args.color || '').trim();
               const colorMatch = chosenColor
-                ? imageGroup.find((img) => {
-                    const hay = `${img.description || ''} ${img.image_url}`.toLowerCase();
-                    return hay.includes(chosenColor.toLowerCase());
-                  })
-                : undefined;
+                ? await findColorImage(supabase, tenantId, availableImageGroups[matchedLabel], chosenColor)
+                : null;
               const sentCountForItem = imageGroup.filter(img => sentUrls.includes(img.image_url)).length;
               const nextIndex = Math.min(sentCountForItem, imageGroup.length - 1);
+              if (chosenColor && !colorMatch && imageGroup.length > 0) {
+                console.log(`No photo for color "${chosenColor}" of "${matchedLabel}" — not sending another color`);
+                toolResponse = `There is no photo of "${matchedLabel}" in ${chosenColor}. Tell the customer in one short sentence that ${chosenColor} is available (if it is in COLOR OPTIONS) but you don't have a photo of that color. Do NOT send a photo of another color.`;
+              } else {
               const imageToSend = colorMatch || imageGroup[nextIndex];
               const imageUrl = imageToSend.image_url;
 
               const isLastPhoto = nextIndex >= imageGroup.length - 1;
               console.log(`Sending image ${nextIndex + 1}/${imageGroup.length} for "${matchedLabel}"${chosenColor ? ` (color: ${chosenColor})` : ''}`);
-              imageSent = await sendWhatsAppImage(
+              const sendResult = await sendWhatsAppImage(
                 usedPhoneNumberId, usedAccessToken, phoneNumber,
                 imageUrl,
-                args.caption || (chosenColor ? `${matchedLabel} — ${chosenColor}` : imageToSend.description)
+                cleanCaption(args.caption) || (chosenColor ? `${matchedLabel} — ${chosenColor}` : cleanCaption(imageToSend.description) || matchedLabel)
               );
+              imageSent = sendResult.ok;
 
 
               if (imageSent) {
@@ -3421,12 +3908,14 @@ serve(async (req) => {
                   status: 'sent',
                   media_url: imageUrl,
                   media_type: imageUrl.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg',
+                  twilio_sid: sendResult.messageId,
                 });
               }
 
               toolResponse = imageSent
                 ? `__IMAGE_SENT__`
                 : `Failed to send image "${matchedLabel}".`;
+              }
             } else {
               toolResponse = `No image found matching "${args.image_label}". Available items: ${Object.keys(availableImageGroups).join(', ')}.`;
             }
@@ -3470,10 +3959,18 @@ serve(async (req) => {
               ? `Order #${args.order_display_id} updated successfully.`
               : `TOOL_FAILED: could not update order #${args.order_display_id} (${result.error}). DO NOT tell the customer the order was updated or that it is "all set". Tell them you couldn't apply the change and a human will follow up, then call transfer_to_human.`;
           } else if (toolCall.function.name === 'get_order_info') {
-            const result = await getOrderInfo(supabase, args.order_display_id, tenantId || '', args.customer_phone);
+            const result = await getOrderInfo(
+              supabase,
+              args.order_display_id,
+              tenantId || '',
+              args.customer_phone,
+              (contact as any)?.phone || phoneNumber,
+              contact?.id,
+            );
             toolResponse = result.success
               ? result.info!
-              : `TOOL_FAILED: ${result.error}. DO NOT invent order details. Ask the customer to double-check the order number, or offer to look it up by their phone number.`;
+              : `TOOL_FAILED: ${result.error}. This is final: the order does NOT exist. DO NOT invent or guess any order, status, tracking number or delivery date. Say you couldn't find it, ask them to double-check the order number, and if they insist call transfer_to_human.`;
+
           } else if (toolCall.function.name === 'transfer_to_human') {
             // Flag the contact as needing a human in the dashboard
             try {
@@ -3531,51 +4028,106 @@ serve(async (req) => {
             return new Response('OK', { status: 200, headers: corsHeaders });
           }
 
-          // Get follow-up from AI
-          const followUp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: 'google/gemini-3.8-flash',
-              messages: [
-                { role: 'system', content: fullSystemPrompt },
-                ...conversationHistory,
-                aiMessage,
-                { role: 'tool', tool_call_id: toolCall.id, content: toolResponse }
-              ],
-            }),
-          });
+          toolMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResponse });
+          lastToolResponse = toolResponse;
+        }
 
-          if (followUp.ok) {
-            const followUpData = await followUp.json();
-            aiReply = followUpData.choices?.[0]?.message?.content || aiReply || toolResponse;
+        // One follow-up answering EVERY tool call at once. Answering them one by
+        // one made the provider reject the request when the model asked for two
+        // tools in the same turn, which left the customer with no reply.
+        if (toolMessages.length > 0) {
+          try {
+            const followUp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'google/gemini-3.8-flash',
+                messages: [
+                  { role: 'system', content: fullSystemPrompt },
+                  ...conversationHistory,
+                  aiMessage,
+                  ...toolMessages,
+                ],
+              }),
+            });
+
+            if (followUp.ok) {
+              const followUpData = await followUp.json();
+              aiReply = followUpData.choices?.[0]?.message?.content || aiReply || '';
+            } else {
+              const followUpError = await followUp.text();
+              console.error('AI follow-up error:', followUp.status, followUpError);
+              await logAIIncident(supabase, {
+                tenant_id: tenantId,
+                contact_id: contact.id,
+                incident_type: 'failure',
+                reason: `AI follow-up error ${followUp.status}`,
+                user_message: messageText,
+                model: AI_MODEL,
+                metadata: { status: followUp.status, error: followUpError.slice(0, 1000), tools: toolMessages.length },
+              });
+            }
+          } catch (e) {
+            console.error('AI follow-up failed:', e);
           }
         }
       }
 
+
+      // Never let internal tool/search text reach the customer.
+      if (aiReply && /SEARCH RESULTS|image_label|send_image|all_colors|in-stock variants:|\(live store, authoritative\)/i.test(aiReply)) {
+        console.warn('Discarded AI reply containing internal tool text');
+        aiReply = '';
+      }
+      const retryDiagnostics: any[] = [];
       if (!aiReply && !imageSent) {
-        // Retry once with a plain completion (no tools) — common when the model
-        // returned only a tool call with no text, or coalesced rapid messages.
-        try {
-          const retry = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'google/gemini-3.8-flash',
-              messages: [
-                { role: 'system', content: fullSystemPrompt },
-                ...conversationHistory,
-              ],
-            }),
-          });
-          if (retry.ok) {
-            const rd = await retry.json();
-            aiReply = rd.choices?.[0]?.message?.content || '';
+        // Two escalating retries. Attempt 1: same context, no tools (the model
+        // often returns only a tool call with no text). Attempt 2: short context
+        // — last few turns and a trimmed prompt — because an over-long history
+        // or a huge catalog prompt is the usual cause of a silent empty reply.
+        const attempts: Array<{ label: string; messages: any[] }> = [
+          {
+            label: 'no-tools',
+            messages: [{ role: 'system', content: fullSystemPrompt }, ...conversationHistory],
+          },
+          {
+            label: 'short-context',
+            messages: [
+              { role: 'system', content: fullSystemPrompt.slice(0, 12000) },
+              ...conversationHistory.slice(-4),
+              { role: 'system', content: 'Reply to the customer now in ONE short sentence, in their language. Never reply with empty text.' },
+            ],
+          },
+        ];
+
+        for (const attempt of attempts) {
+          if (aiReply) break;
+          try {
+            const retry = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: 'google/gemini-3.8-flash', messages: attempt.messages }),
+            });
+            if (retry.ok) {
+              const rd = await retry.json();
+              aiReply = rd.choices?.[0]?.message?.content || '';
+              if (!aiReply) {
+                retryDiagnostics.push({ attempt: attempt.label, status: 200, finish: rd.choices?.[0]?.finish_reason || null });
+              }
+            } else {
+              const body = await retry.text();
+              console.error('Empty-reply retry error:', attempt.label, retry.status, body);
+              retryDiagnostics.push({ attempt: attempt.label, status: retry.status, error: body.slice(0, 500) });
+            }
+          } catch (e) {
+            console.error('Empty-reply retry failed:', attempt.label, e);
+            retryDiagnostics.push({ attempt: attempt.label, error: String(e).slice(0, 300) });
           }
-        } catch (e) { console.error('Empty-reply retry failed:', e); }
+        }
+
 
         if (!aiReply) {
           await logAIIncident(supabase, {
@@ -3585,6 +4137,7 @@ serve(async (req) => {
             reason: 'AI produced empty reply (after retry)',
             user_message: messageText,
             model: AI_MODEL,
+            metadata: { retries: retryDiagnostics, history_turns: conversationHistory.length, prompt_chars: fullSystemPrompt.length },
           });
           // Stay silent rather than sending a generic apology, but surface the
           // chat to the team so the customer is not left waiting unnoticed.
@@ -3692,8 +4245,8 @@ serve(async (req) => {
                 const sentUrls = (sentImages || []).map((m: any) => m.media_url);
                 const sentCount = group.filter(img => sentUrls.includes(img.image_url)).length;
                 const img = group[Math.min(sentCount, group.length - 1)];
-                const ok = await sendWhatsAppImage(usedPhoneNumberId, usedAccessToken, phoneNumber, img.image_url, rArgs.caption || img.description);
-                if (ok) {
+                const sendResult = await sendWhatsAppImage(usedPhoneNumberId, usedAccessToken, phoneNumber, img.image_url, cleanCaption(rArgs.caption) || cleanCaption(img.description) || matchedLabel);
+                if (sendResult.ok) {
                   imageSent = true;
                   aiReply = '';
                   await supabase.from('messages').insert({
@@ -3702,6 +4255,7 @@ serve(async (req) => {
                     direction: 'outgoing', status: 'sent',
                     media_url: img.image_url,
                     media_type: img.image_url.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg',
+                    twilio_sid: sendResult.messageId,
                   });
                 }
               }

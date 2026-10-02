@@ -1,140 +1,150 @@
-// Instagram Business Login OAuth flow for a tenant's professional account.
+// Connects a tenant's Instagram professional account through Facebook Login
+// (Messenger Platform for Instagram). The browser sends the Facebook user
+// token; we find the Page linked to the Instagram account, store a long-lived
+// Page token and subscribe the Page to message webhooks.
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-acting-tenant, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+};
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
-const APP_ID = Deno.env.get('INSTAGRAM_APP_ID') ?? Deno.env.get('META_APP_ID') ?? '';
-const APP_SECRET = Deno.env.get('INSTAGRAM_APP_SECRET') ?? Deno.env.get('META_APP_SECRET') ?? '';
-const INSTAGRAM_GRAPH_VERSION = 'v25.0';
-
-const SCOPES = [
-  'instagram_business_basic',
-  'instagram_business_manage_messages',
-].join(',');
+const APP_ID = Deno.env.get('META_APP_ID') ?? '';
+const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
+const GRAPH = 'https://graph.facebook.com/v21.0';
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-const json = (payload: unknown, status = 200) =>
+const json = (payload: unknown) =>
   new Response(JSON.stringify(payload), {
-    status,
+    status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+const fail = (error: string, details?: unknown) => {
+  console.error('instagram-connect failure:', error, JSON.stringify(details ?? {}));
+  return json({ success: false, error });
+};
+
+async function graph(path: string, token: string, init?: RequestInit) {
+  const sep = path.includes('?') ? '&' : '?';
+  const res = await fetch(`${GRAPH}${path}${sep}access_token=${encodeURIComponent(token)}`, init);
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok && !data?.error, data };
+}
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
-    if (!APP_ID || !APP_SECRET) {
-      return json({ error: 'Meta app credentials are not configured' }, 400);
+    if (!APP_ID || !APP_SECRET) return fail('Meta app credentials are not configured.');
+
+    const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
+    const { data: { user } } = await admin.auth.getUser(jwt);
+    if (!user) return fail('Your session expired. Please sign in again.');
+
+    // Resolve the workspace: super admins may act on behalf of a client.
+    const acting = req.headers.get('x-acting-tenant');
+    let tenantId: string | null = null;
+    if (acting) {
+      const [{ data: member }, { data: role }] = await Promise.all([
+        admin.from('tenant_members').select('tenant_id').eq('tenant_id', acting).eq('user_id', user.id).maybeSingle(),
+        admin.from('user_roles').select('role').eq('user_id', user.id).eq('role', 'super_admin').maybeSingle(),
+      ]);
+      if (!member && !role) return fail('You are not allowed to manage that workspace.');
+      tenantId = acting;
+    } else {
+      const { data } = await admin.rpc('get_user_tenant_id', { p_user_id: user.id });
+      tenantId = data as string | null;
     }
-
-    const authHeader = req.headers.get('Authorization') ?? '';
-    const userClient = createClient(SUPABASE_URL, ANON, {
-      global: { headers: { Authorization: authHeader } },
-      auth: { persistSession: false },
-    });
-    const { data: auth } = await userClient.auth.getUser();
-    if (!auth?.user) return json({ error: 'Unauthorized' }, 401);
-
-    const { data: tenantId } = await admin.rpc('get_user_tenant_id', { p_user_id: auth.user.id });
-    if (!tenantId) return json({ error: 'No tenant for this user' }, 400);
+    if (!tenantId) return fail('No workspace found for this user.');
 
     const body = await req.json().catch(() => ({}));
-    const action = body?.action === 'exchange' ? 'exchange' : 'start';
-    const redirectTo = typeof body?.redirectTo === 'string' ? body.redirectTo : '';
+    const shortToken = typeof body?.userAccessToken === 'string' ? body.userAccessToken : '';
+    const pageIdChoice = typeof body?.pageId === 'string' ? body.pageId : '';
+    if (!shortToken) return fail('Missing Facebook login token.');
 
-    if (action === 'start') {
-      if (!redirectTo) return json({ error: 'redirectTo is required' }, 400);
-      const state = crypto.randomUUID();
-      const authUrl =
-        `https://www.instagram.com/oauth/authorize?client_id=${APP_ID}` +
-        `&redirect_uri=${encodeURIComponent(redirectTo)}` +
-        `&state=${state}&response_type=code&scope=${encodeURIComponent(SCOPES)}`;
-      return json({ authUrl, state });
+    // Make sure the token was issued to our app.
+    const debug = await graph(`/debug_token?input_token=${encodeURIComponent(shortToken)}`, `${APP_ID}|${APP_SECRET}`);
+    if (!debug.ok || String(debug.data?.data?.app_id) !== APP_ID || !debug.data?.data?.is_valid) {
+      return fail('Facebook login could not be verified. Please try again.', debug.data);
     }
 
-    // action === 'exchange'
-    const code = typeof body?.code === 'string' ? body.code : '';
-    if (!code || !redirectTo) return json({ error: 'code and redirectTo are required' }, 400);
+    // Long-lived user token -> Page tokens derived from it never expire.
+    let userToken = shortToken;
+    const ll = await fetch(
+      `${GRAPH}/oauth/access_token?grant_type=fb_exchange_token&client_id=${APP_ID}&client_secret=${APP_SECRET}&fb_exchange_token=${encodeURIComponent(shortToken)}`,
+    ).then((r) => r.json()).catch(() => ({}));
+    if (ll?.access_token) userToken = ll.access_token;
 
-    const tokenForm = new FormData();
-    tokenForm.set('client_id', APP_ID);
-    tokenForm.set('client_secret', APP_SECRET);
-    tokenForm.set('grant_type', 'authorization_code');
-    tokenForm.set('redirect_uri', redirectTo);
-    tokenForm.set('code', code.replace(/#_$/, ''));
-    const tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
-      method: 'POST',
-      body: tokenForm,
-    });
-    const tokenJson = await tokenRes.json().catch(() => ({}));
-    const tokenData = Array.isArray(tokenJson?.data) ? tokenJson.data[0] : tokenJson;
-    if (!tokenRes.ok || !tokenData?.access_token || !tokenData?.user_id) {
-      console.error('Instagram token exchange failed', tokenJson);
-      return json({ error: tokenJson?.error_message || tokenJson?.error?.message || 'Token exchange failed' }, 400);
-    }
-
-    const longTokenUrl = new URL('https://graph.instagram.com/access_token');
-    longTokenUrl.searchParams.set('grant_type', 'ig_exchange_token');
-    longTokenUrl.searchParams.set('client_secret', APP_SECRET);
-    longTokenUrl.searchParams.set('access_token', tokenData.access_token);
-    const longTokenRes = await fetch(longTokenUrl);
-    const longTokenJson = await longTokenRes.json().catch(() => ({}));
-    const accessToken = longTokenRes.ok && longTokenJson?.access_token
-      ? longTokenJson.access_token
-      : tokenData.access_token;
-
-    // Instagram Login API requires a versioned graph.instagram.com endpoint.
-    const profileRes = await fetch(
-      `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/me?fields=user_id,username,account_type&access_token=${encodeURIComponent(accessToken)}`,
+    const accounts = await graph(
+      '/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&limit=100',
+      userToken,
     );
-    const profileJson = await profileRes.json().catch(() => ({}));
-    const profile = Array.isArray(profileJson?.data) ? profileJson.data[0] : profileJson;
-    if (!profileRes.ok || !profile?.user_id) {
-      console.error('Instagram profile lookup failed', profileJson);
-      return json({
-        error: profileJson?.error?.message || 'Could not verify the connected Instagram professional account',
-      }, 400);
+    if (!accounts.ok) {
+      return fail(accounts.data?.error?.message || 'Could not read your Facebook Pages.', accounts.data);
+    }
+    const pages = (accounts.data?.data ?? []).filter((p: any) => p?.instagram_business_account?.id);
+    if (!pages.length) {
+      return fail(
+        'None of the Facebook Pages you shared has an Instagram professional account linked. Link Instagram to your Page (Page settings → Linked accounts) and make sure you selected that Page in the Facebook popup.',
+      );
     }
 
-    const igAccountId = String(profile.user_id);
+    let page = pageIdChoice ? pages.find((p: any) => p.id === pageIdChoice) : pages.length === 1 ? pages[0] : null;
+    if (!page) {
+      return json({
+        success: false,
+        needsPageSelection: true,
+        pages: pages.map((p: any) => ({
+          pageId: p.id,
+          pageName: p.name,
+          igUsername: p.instagram_business_account?.username ?? null,
+        })),
+      });
+    }
 
-    // Subscribe this professional account so DMs reach our webhook.
-    const subscribeRes = await fetch(
-      `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/${igAccountId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(accessToken)}`,
+    const pageToken: string = page.access_token;
+    const igAccountId = String(page.instagram_business_account.id);
+    const igUsername: string | null = page.instagram_business_account.username ?? null;
+
+    // Subscribe the Page so Instagram DMs reach our webhook.
+    const sub = await graph(
+      `/${page.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks`,
+      pageToken,
       { method: 'POST' },
     );
-
-    if (!subscribeRes.ok) {
-      const subscribeError = await subscribeRes.json().catch(() => ({}));
-      console.error('Instagram webhook subscription failed', subscribeError);
-      return json({ error: subscribeError?.error?.message || 'Could not subscribe the Instagram account to messages' }, 400);
+    if (!sub.ok) {
+      return fail(sub.data?.error?.message || 'Could not subscribe the Page to Instagram messages.', sub.data);
     }
 
-    const { error: upsertErr } = await admin
+    // One Instagram account belongs to one workspace: retire older links.
+    await admin
       .from('tenant_credentials')
-      .upsert(
-        {
-          tenant_id: tenantId,
-          provider: 'instagram',
-          access_token: accessToken,
-          ig_account_id: igAccountId,
-          ig_username: profile?.username ?? null,
-          page_id: null,
-          is_active: true,
-        },
-        { onConflict: 'tenant_id,provider' },
-      );
-    if (upsertErr) {
-      console.error('Failed to save Instagram credentials', upsertErr);
-      return json({ error: 'Could not save the connection' }, 500);
-    }
+      .update({ is_active: false })
+      .eq('provider', 'instagram')
+      .eq('ig_account_id', igAccountId)
+      .neq('tenant_id', tenantId);
 
-    return json({ ok: true, username: profile?.username ?? null });
+    const { error: upsertErr } = await admin.from('tenant_credentials').upsert(
+      {
+        tenant_id: tenantId,
+        provider: 'instagram',
+        access_token: pageToken,
+        ig_account_id: igAccountId,
+        ig_username: igUsername,
+        page_id: page.id,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'tenant_id,provider' },
+    );
+    if (upsertErr) return fail('Could not save the Instagram connection.', upsertErr);
+
+    return json({ success: true, username: igUsername, pageName: page.name });
   } catch (err) {
-    console.error('instagram-connect error', err);
-    return json({ error: 'Unexpected error' }, 500);
+    return fail(err instanceof Error ? err.message : 'Unexpected error');
   }
 });

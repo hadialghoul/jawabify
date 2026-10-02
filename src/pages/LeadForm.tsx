@@ -114,13 +114,8 @@ export default function LeadForm() {
     }
 
     trackLead({ content_name: "Ad Lead Form", source: searchParams.get("utm_source") || "direct" });
-    supabase.functions.invoke("send-transactional-email", {
-      body: {
-        templateName: "lead-welcome",
-        recipientEmail: email,
-        idempotencyKey: `ad-lead-welcome-${email}-${Date.now()}`,
-        templateData: { fullName },
-      },
+    supabase.functions.invoke("send-lead-welcome", {
+      body: { email },
     }).catch(() => undefined);
     setSubmitted(true);
     window.scrollTo({ top: 0, behavior: "smooth" });

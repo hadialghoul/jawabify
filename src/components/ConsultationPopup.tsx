@@ -94,13 +94,8 @@ export default function ConsultationPopup() {
       return;
     }
     // Fire-and-forget welcome email with booking CTA.
-    supabase.functions.invoke('send-transactional-email', {
-      body: {
-        templateName: 'lead-welcome',
-        recipientEmail: email,
-        idempotencyKey: `lead-welcome-${email}-${Date.now()}`,
-        templateData: { fullName: full_name },
-      },
+    supabase.functions.invoke('send-lead-welcome', {
+      body: { email },
     }).catch((e) => console.warn('lead-welcome email failed', e));
     trackLead({ content_name: 'Consultation Popup', source_path: location.pathname });
     localStorage.setItem(STORAGE_KEY, "true");

@@ -4,7 +4,6 @@
 //   app_settings.ai_replies_enabled (tenant) and contacts.ai_enabled (per chat).
 
 const GATEWAY = 'https://ai.gateway.lovable.dev/v1';
-const INSTAGRAM_GRAPH_VERSION = 'v25.0';
 
 const BASE_PROMPT = `You are an Instagram Direct assistant for this business. Keep every reply to ONE short sentence, never more than 15 words unless the customer explicitly asks for details. No greetings, no filler, no over-explaining. Emojis sparingly.
 
@@ -221,7 +220,7 @@ export async function replyToInstagramMessage(opts: {
 
   // ===== Send =====
   const sendRes = await fetch(
-    `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/${senderId}/messages?access_token=${encodeURIComponent(accessToken)}`,
+    `https://graph.facebook.com/v21.0/${senderId}/messages?access_token=${encodeURIComponent(accessToken)}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

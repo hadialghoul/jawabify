@@ -15,6 +15,76 @@
       "when": 1789818566958,
       "tag": "0001_get_tenant_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790162339404,
+      "tag": "0002_create_app_user_oauth_nonces",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790243942138,
+      "tag": "0003_service_location_hours",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790323543814,
+      "tag": "0004_set_verve_vertical_restaurant",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790327400011,
+      "tag": "0005_restaurant_seating_areas",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790333132678,
+      "tag": "0006_restaurant_tables_floor_area",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790595486696,
+      "tag": "0007_add_contact_lead_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790675506930,
+      "tag": "0008_campaign_real_counts",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790760108722,
+      "tag": "0009_user_lead_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790770547274,
+      "tag": "0010_shopify_expiring_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790882398485,
+      "tag": "0011_quick_answers",
+      "breakpoints": true
     }
   ]
 }

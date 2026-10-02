@@ -1,3 +1,4 @@
+import { askPaymentMethod } from "./online-payment.ts";
 // Deterministic restaurant ordering state machine.
 // States: picking_item → qty → reviewing_cart → mode → address → name → confirm → done|cancelled
 //         (+ editing_items, editing_qty, editing_address, editing_name)
@@ -329,6 +330,24 @@ async function advance(deps: RestaurantFlowDeps, session: Session, incoming: Inc
           }
         }
         if (incoming.type === "text" && incoming.text) {
+          // Multi-item text: "2 burger, 1 fries and pepsi"
+          const parts = normalizeDigits(incoming.text).split(/,|\n|\+|&| and | و /i).map((p) => p.trim()).filter(Boolean);
+          if (parts.length > 1) {
+            const found: Array<{ m: any; q: number }> = [];
+            for (const p of parts) {
+              const q = parseInt(p.match(/\d+/)?.[0] || "1", 10);
+              const m = matchMenuItem(p.replace(/\d+\s*x?/i, "").trim() || p, deps.menu);
+              if (m) found.push({ m, q: q > 0 && q <= MAX_QTY ? q : 1 });
+            }
+            if (found.length > 1) {
+              for (const f of found) session.draft.items.push({ menu_item_id: f.m.id, name: f.m.name, qty: f.q, unit_price: f.m.price });
+              recomputeTotals(session.draft);
+              session.state = "reviewing_cart";
+              await saveSession(deps.supabase, session);
+              await advance(deps, session, null);
+              return;
+            }
+          }
           const direct = matchMenuItem(incoming.text, deps.menu);
           if (direct) {
             session.draft.items.push({ menu_item_id: direct.id, name: direct.name, qty: 1, unit_price: direct.price });
@@ -343,7 +362,10 @@ async function advance(deps: RestaurantFlowDeps, session: Session, incoming: Inc
       const rows = deps.menu.slice(0, 10).map((m) => ({
         id: `item_${m.id}`, title: m.name, description: `${deps.currency} ${m.price.toFixed(2)}`,
       }));
-      await sendList(deps, "What would you like to order?", "View menu", rows);
+      const body = session.draft.items.length
+        ? "Pick another item from the menu:"
+        : "What would you like to order? Pick an item — you can add more after, or type several (e.g. 2 burger, 1 fries).";
+      await sendList(deps, body, "View menu", rows);
       return;
     }
 
@@ -375,7 +397,7 @@ async function advance(deps: RestaurantFlowDeps, session: Session, incoming: Inc
         if (incoming.id === "cart_add") {
           session.state = "picking_item";
           await saveSession(deps.supabase, session);
-          await sendText(deps, "What else would you like? Reply with the item name.");
+          await advance(deps, session, null);
           return;
         }
         if (incoming.id === "cart_done") {
@@ -614,6 +636,24 @@ async function advance(deps: RestaurantFlowDeps, session: Session, incoming: Inc
   }
 }
 
+// Restaurant dashboards list the `orders` table, so mirror each AI bill there.
+export async function mirrorBillToOrders(supabase: any, o: {
+  tenantId: string; contactId: string | null; customerName: string | null; phone: string;
+  orderType: string | null; address: string | null; deliveryFee: number; total: number;
+  items: Array<{ name: string; qty: number }>;
+}): Promise<number | null> {
+  const product = o.items.map((i) => `${i.qty}× ${i.name}`).join(", ");
+  const qty = o.items.reduce((s, i) => s + (Number(i.qty) || 0), 0) || 1;
+  const address = o.orderType === "delivery" ? (o.address || "") : o.orderType === "pickup" ? "Pickup" : "Dine-in";
+  const { data, error } = await supabase.from("orders").insert({
+    tenant_id: o.tenantId, contact_id: o.contactId, customer_name: o.customerName || "Customer",
+    customer_phone: o.phone, customer_address: address, product_name: product, quantity: qty,
+    delivery_fee: o.orderType === "delivery" ? o.deliveryFee : 0, total_price: o.total, status: "pending",
+  }).select("display_id").single();
+  if (error) { console.error("mirrorBillToOrders failed", error); return null; }
+  return data?.display_id ?? null;
+}
+
 async function finalizeBill(deps: RestaurantFlowDeps, session: Session): Promise<void> {
   const d = session.draft;
   // Dedup: same total in last 5 minutes
@@ -659,6 +699,13 @@ async function finalizeBill(deps: RestaurantFlowDeps, session: Session): Promise
     unit_price: i.unit_price,
   })));
 
+  const mirroredId = await mirrorBillToOrders(deps.supabase, {
+    tenantId: deps.tenantId, contactId: deps.contactId, customerName: d.customer_name ?? null, phone: deps.phoneNumber,
+    orderType: d.order_type ?? null, address: d.delivery_address ?? null,
+    deliveryFee: deps.deliveryFee, total: d.total, items: d.items,
+  });
+  if (mirroredId && !bill.display_id) bill.display_id = mirroredId;
+
   // Notify kitchen
   if (deps.kitchenNotifyPhone) {
     const orderRef = bill.display_id ? `#${bill.display_id}` : `#${bill.id.slice(0, 4)}`;
@@ -681,6 +728,10 @@ async function finalizeBill(deps: RestaurantFlowDeps, session: Session): Promise
   const orderRef = bill.display_id ? `#${bill.display_id}` : `#${bill.id.slice(0, 4)}`;
   const etaLine = d.order_type === "delivery" ? ` ETA: ${deps.etaText}.` : d.order_type === "pickup" ? " Ready for pickup soon." : "";
   await sendText(deps, `✅ Order confirmed (${orderRef})!\nTotal: ${deps.currency} ${d.total.toFixed(2)}.${etaLine}`);
+  await askPaymentMethod(
+    { supabase: deps.supabase, tenantId: deps.tenantId, contactId: deps.contactId as string, phoneNumber: deps.phoneNumber, phoneNumberId: deps.phoneNumberId, accessToken: deps.accessToken },
+    { total: d.total, currency: deps.currency, ref: bill.display_id ?? null, inPersonLabel: d.order_type === "delivery" ? undefined : "Pay in person" },
+  ).catch((e) => console.error("askPaymentMethod failed", e));
 }
 
 // Tool definition for the AI

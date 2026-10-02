@@ -3,6 +3,21 @@
 // Used by both shopify-webhook (instant) and shopify-auto-sync (fallback when
 // Shopify webhook deliveries fail HMAC verification or never arrive).
 
+// Meta rejects anything that is not E.164 digits (error 131009 "phone number is
+// malformed"). Store phones often arrive in local format ("03 123 456",
+// "00961..."), so normalize before calling Graph.
+const DEFAULT_COUNTRY_CODE = Deno.env.get("DEFAULT_COUNTRY_CODE") || "961";
+
+export function toE164(raw: string, defaultCc = DEFAULT_COUNTRY_CODE): string | null {
+  let d = String(raw || "").replace("whatsapp:", "").replace(/\D/g, "");
+  if (!d) return null;
+  d = d.replace(/^00+/, "");
+  if (d.startsWith("0")) d = defaultCc + d.replace(/^0+/, "");
+  else if (d.length <= 9) d = defaultCc + d;
+  if (d.length < 10 || d.length > 15) return null;
+  return d;
+}
+
 export async function sendOrderConfirmation(
   supabase: any,
   tenantId: string,
@@ -46,8 +61,8 @@ export async function sendOrderConfirmation(
     return { sent: false, reason: "no_whatsapp_credentials" };
   }
 
-  const cleaned = args.phone.replace("whatsapp:", "").replace(/\D/g, "");
-  if (cleaned.length < 8) return { sent: false, reason: "invalid_phone" };
+  const cleaned = toE164(args.phone);
+  if (!cleaned) return { sent: false, reason: "invalid_phone" };
 
   const params = [args.name, args.orderNumber, args.total].map((v) => ({
     type: "text",

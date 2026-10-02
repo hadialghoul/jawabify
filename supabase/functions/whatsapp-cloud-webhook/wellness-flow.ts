@@ -3,6 +3,7 @@
 //         (+ editing_service, editing_date, editing_time, editing_name)
 //
 // Writes to `wellness_sessions` (+ updates `wellness_leads`).
+import { pushBookingToGoogleCalendar } from "../_shared/googleCalendarPush.ts";
 // Same shape as restaurant-flow.ts so future verticals (healthcare, real-estate, education)
 // can reuse the slot-picker helpers.
 
@@ -184,9 +185,24 @@ function matchService(hint: string, services: WellnessService[]): WellnessServic
   return null;
 }
 
-function combineDateTime(date: string, time: string): string {
-  // Interpret as UTC. Studios can adjust later via offset.
-  return new Date(`${date}T${time}:00Z`).toISOString();
+const BUSINESS_TZ = Deno.env.get("BUSINESS_TIMEZONE") || "Asia/Beirut";
+
+function tzOffsetMs(at: Date, tz: string): number {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).formatToParts(at).map((x) => [x.type, x.value]),
+  );
+  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return asUtc - at.getTime();
+}
+
+function combineDateTime(date: string, time: string, tz: string = BUSINESS_TZ): string {
+  // The customer's time is the business's local time (default Beirut), not UTC.
+  const naive = new Date(`${date}T${time}:00Z`);
+  const offset = tzOffsetMs(naive, tz);
+  return new Date(naive.getTime() - offset).toISOString();
 }
 
 // ---------- whatsapp send helpers ----------
@@ -587,7 +603,8 @@ async function finalizeBooking(deps: WellnessFlowDeps, session: Session): Promis
     await cancelSession(deps.supabase, session.id);
     return;
   }
-  const scheduledAt = combineDateTime(d.scheduled_date, d.scheduled_time);
+  const { data: tzRow } = await deps.supabase.from("wellness_settings").select("timezone").eq("tenant_id", deps.tenantId).maybeSingle();
+  const scheduledAt = combineDateTime(d.scheduled_date, d.scheduled_time, tzRow?.timezone || BUSINESS_TZ);
 
   // Dedup: same service + same scheduled_at within last 5 minutes
   const { data: recent } = await deps.supabase
@@ -651,6 +668,17 @@ async function finalizeBooking(deps: WellnessFlowDeps, session: Session): Promis
 
   session.state = "done";
   await saveSession(deps.supabase, session);
+
+  // Push the confirmed booking to the tenant owner's Google Calendar (if connected).
+  // Fire-and-forget: calendar sync must never block or fail the booking.
+  pushBookingToGoogleCalendar(deps.supabase, deps.tenantId, {
+    serviceName: d.service_name,
+    customerName: d.customer_name,
+    customerPhone: deps.phoneNumber,
+    scheduledAt,
+    durationMin: duration,
+    notes: d.notes ?? null,
+  }).catch(() => {});
 
   await sendText(deps,
     `✅ Booking confirmed!\n💆 ${d.service_name}\n📅 ${d.scheduled_date} at ${d.scheduled_time}\n\nWe'll send you a reminder before your session. See you soon, ${d.customer_name}!`

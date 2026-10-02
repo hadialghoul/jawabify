@@ -197,6 +197,67 @@ export function restUrl(shop: string, endpoint: string): string {
   return `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/${endpoint.replace(/^\//, "")}`;
 }
 
+/**
+ * Shopify now rejects non-expiring offline tokens. Stores installed through the
+ * v2 app carry a refresh_token; this swaps an expired/near-expiry token for a
+ * fresh one (persisted) so every caller keeps working transparently.
+ */
+const tokenCache = new Map<string, { token: string; exp: number }>();
+export async function resolveShopToken(shop: string, token: string): Promise<string> {
+  const cached = tokenCache.get(token);
+  if (cached && cached.exp > Date.now() + 60_000) return cached.token;
+  const app = v2AppCreds();
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!app || !url || !key) return token;
+  try {
+    const { createClient } = await import("npm:@supabase/supabase-js@2");
+    const db = createClient(url, key);
+    const { data: row } = await db.from("tenant_credentials")
+      .select("id, access_token, refresh_token, token_expires_at")
+      .eq("provider", "shopify").eq("shop_domain", shop).eq("access_token", token).maybeSingle();
+    if (!row?.refresh_token) return token;
+    const exp = row.token_expires_at ? new Date(row.token_expires_at).getTime() : 0;
+    if (exp > Date.now() + 120_000) {
+      tokenCache.set(token, { token, exp });
+      return token;
+    }
+    const fresh = await refreshShopToken(shop, row.refresh_token, app.client_id, app.client_secret);
+    if (!fresh) return token;
+    await db.from("tenant_credentials").update({
+      access_token: fresh.access_token,
+      refresh_token: fresh.refresh_token,
+      token_expires_at: fresh.expires_at,
+      updated_at: new Date().toISOString(),
+    }).eq("id", row.id);
+    const e = new Date(fresh.expires_at).getTime();
+    tokenCache.set(token, { token: fresh.access_token, exp: e });
+    tokenCache.set(fresh.access_token, { token: fresh.access_token, exp: e });
+    return fresh.access_token;
+  } catch (e) {
+    console.warn("resolveShopToken failed", e);
+    return token;
+  }
+}
+
+export async function refreshShopToken(shop: string, refreshToken: string, clientId: string, secret: string) {
+  const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ client_id: clientId, client_secret: secret, grant_type: "refresh_token", refresh_token: refreshToken }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d?.access_token) {
+    console.error("shopify token refresh failed", r.status, d);
+    return null;
+  }
+  return {
+    access_token: String(d.access_token),
+    refresh_token: String(d.refresh_token || refreshToken),
+    expires_at: new Date(Date.now() + Number(d.expires_in || 3600) * 1000).toISOString(),
+  };
+}
+
 export async function shopifyRest(
   shop: string,
   token: string,
@@ -204,9 +265,10 @@ export async function shopifyRest(
   method = "GET",
   body?: unknown,
 ): Promise<Response> {
+  const t = await resolveShopToken(shop, token);
   return await fetch(restUrl(shop, endpoint), {
     method,
-    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    headers: { "X-Shopify-Access-Token": t, "Content-Type": "application/json" },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 }
@@ -217,9 +279,10 @@ export async function shopifyGraphQL<T = any>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<{ ok: boolean; status: number; data?: T; errors?: unknown }> {
+  const t = await resolveShopToken(shop, token);
   const res = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: "POST",
-    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    headers: { "X-Shopify-Access-Token": t, "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables: variables || {} }),
   });
   const json = await res.json().catch(() => ({}));
@@ -241,7 +304,8 @@ export interface RestLikeProduct {
   product_type?: string;
   vendor?: string;
   tags?: string;
-  images: Array<{ id: number | undefined; src: string; alt?: string }>;
+  options?: Array<{ name: string; values: string[] }>;
+  images: Array<{ id: number | undefined; src: string; alt?: string; variant_ids?: number[] }>;
   variants: Array<{
     id: number | undefined;
     title: string;
@@ -249,6 +313,11 @@ export interface RestLikeProduct {
     sku?: string;
     inventory_quantity?: number;
     available?: boolean;
+    option1?: string;
+    option2?: string;
+    option3?: string;
+    image_id?: number;
+    featured_image?: { id?: number; src: string; alt?: string };
   }>;
 }
 
@@ -265,9 +334,10 @@ query Products($cursor: String, $first: Int!) {
       productType
       vendor
       tags
+      options { name values }
       media(first: 10) {
         nodes {
-          ... on MediaImage { id image { url altText } }
+          ... on MediaImage { id image { id url altText } }
         }
       }
       variants(first: 100) {
@@ -278,6 +348,8 @@ query Products($cursor: String, $first: Int!) {
           sku
           inventoryQuantity
           availableForSale
+          selectedOptions { name value }
+          image { id url altText }
         }
       }
     }
@@ -285,6 +357,10 @@ query Products($cursor: String, $first: Int!) {
 }`;
 
 function mapProductNode(n: any): RestLikeProduct {
+  const options = (n.options || []).map((o: any) => ({
+    name: String(o.name || ""),
+    values: (o.values || []).map((v: any) => String(v)),
+  }));
   return {
     id: numericId(n.id),
     title: String(n.title || ""),
@@ -294,22 +370,49 @@ function mapProductNode(n: any): RestLikeProduct {
     product_type: n.productType || undefined,
     vendor: n.vendor || undefined,
     tags: Array.isArray(n.tags) ? n.tags.join(", ") : (n.tags || undefined),
+    options,
     images: (n.media?.nodes || [])
       .filter((m: any) => m?.image?.url)
       .map((m: any) => ({
-        id: numericId(m.id),
+        id: numericId(m.image.id) ?? numericId(m.id),
         src: m.image.url as string,
         alt: m.image.altText || undefined,
       })),
-    variants: (n.variants?.nodes || []).map((v: any) => ({
-      id: numericId(v.id),
-      title: String(v.title || ""),
-      price: String(v.price ?? ""),
-      sku: v.sku || undefined,
-      inventory_quantity: typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : undefined,
-      available: v.availableForSale ?? undefined,
-    })),
+    variants: (n.variants?.nodes || []).map((v: any) => {
+      const selected = new Map((v.selectedOptions || []).map((o: any) => [String(o.name), String(o.value)]));
+      const optionValues = options.map((o: any) => selected.get(o.name) || '');
+      return {
+        id: numericId(v.id),
+        title: String(v.title || ""),
+        price: String(v.price ?? ""),
+        sku: v.sku || undefined,
+        inventory_quantity: typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : undefined,
+        available: v.availableForSale ?? undefined,
+        option1: optionValues[0] || undefined,
+        option2: optionValues[1] || undefined,
+        option3: optionValues[2] || undefined,
+        image_id: numericId(v.image?.id),
+        featured_image: v.image?.url ? { id: numericId(v.image.id), src: v.image.url, alt: v.image.altText || undefined } : undefined,
+      };
+    }),
   };
+}
+
+/** Fetches one product with complete option and variant-image relationships. */
+export async function fetchProductById(shop: string, token: string, id: string): Promise<RestLikeProduct | null> {
+  const r = await shopifyGraphQL<any>(shop, token, `
+    query ProductById($id: ID!) {
+      product(id: $id) {
+        id title handle status descriptionHtml productType vendor tags
+        options { name values }
+        media(first: 100) { nodes { ... on MediaImage { id image { id url altText } } } }
+        variants(first: 100) {
+          nodes { id title price sku inventoryQuantity availableForSale selectedOptions { name value } image { id url altText } }
+        }
+      }
+    }
+  `, { id: `gid://shopify/Product/${id}` });
+  return r.ok && r.data?.product ? mapProductNode(r.data.product) : null;
 }
 
 /** Fetches ONE page of non-archived products (cursor-based) for chunked jobs. */
@@ -430,4 +533,14 @@ export async function registerWebhooks(
     }
   }
   return out;
+}
+
+/**
+ * The new App Store listing ("Jawabify – WhatsApp AI", embedded, Shopify-managed
+ * install + token exchange, Billing API only). Empty until its secrets are set.
+ */
+export function v2AppCreds(): { client_id: string; client_secret: string } | null {
+  const client_id = Deno.env.get("SHOPIFY_V2_CLIENT_ID") || "";
+  const client_secret = Deno.env.get("SHOPIFY_V2_CLIENT_SECRET") || "";
+  return client_id && client_secret ? { client_id, client_secret } : null;
 }

@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   isValidShopDomain,
   loadCustomAppCreds,
+  v2AppCreds,
   normalizeShopDomain,
   rawShopDomain,
   registerWebhooks,
@@ -91,7 +92,7 @@ Deno.serve(async (req) => {
     };
   };
 
-  const allSecrets = [SHOPIFY_CLIENT_SECRET, ...customApps.map((a) => a.client_secret)];
+  const allSecrets = [SHOPIFY_CLIENT_SECRET, v2AppCreds()?.client_secret, ...customApps.map((a) => a.client_secret)];
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

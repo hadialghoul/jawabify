@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
       return_url: returnUrl,
       customer: customerId,
       customer_update: { address: 'auto', name: 'auto' },
-      automatic_tax: { enabled: true },
+      ...(env !== "live" && { automatic_tax: { enabled: true } }),
       subscription_data: {
         metadata: { userId: user.id },
         ...(!hasHadSub && { trial_period_days: 7 }),

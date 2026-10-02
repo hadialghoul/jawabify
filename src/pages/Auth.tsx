@@ -73,6 +73,8 @@ export default function Auth() {
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [resendingVerification, setResendingVerification] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
 
   // While on the "waiting to verify" panel, auto-advance the moment the
   // email is verified — even when verification happens on another device.
@@ -148,6 +150,24 @@ export default function Auth() {
     setResendingVerification(false);
     if (error) toast.error(error.message);
     else toast.success('Verification email resent.');
+  };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingVerificationEmail || verifyCode.length < 6) return;
+    setVerifyingCode(true);
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: pendingVerificationEmail,
+      token: verifyCode,
+      type: 'signup',
+    });
+    setVerifyingCode(false);
+    if (error || !data?.session) {
+      toast.error('That code is wrong or expired. Tap "Resend" for a new one.');
+      return;
+    }
+    window.sessionStorage.setItem(APP_HISTORY_LOCK_KEY, 'true');
+    navigate(withShop('/onboarding', shopifyInstallShop), { replace: true });
   };
 
   const handleSendReset = async () => {
@@ -248,33 +268,18 @@ export default function Auth() {
         }
         trackLead({ content_name: 'Auth Sign Up', status: 'success' });
         trackCompleteRegistration({ content_name: 'Auth Sign Up', status: 'success' });
-        // Fire-and-forget welcome email with onboarding call CTA.
-        supabase.functions.invoke('send-transactional-email', {
-          body: {
-            templateName: 'signup-welcome',
-            recipientEmail: email,
-            idempotencyKey: `signup-welcome-${signUpData?.user?.id ?? email}`,
-            templateData: { firstName: firstName.trim(), businessName: businessName.trim() },
-          },
-        }).catch((e) => console.warn('signup-welcome email failed', e));
-        // Fire-and-forget internal notifications of the new signup.
-        ['Info@theleadsbridge.com', 'jawabify@gmail.com'].forEach((notifyEmail) => {
-          supabase.functions.invoke('send-transactional-email', {
+        // Fire-and-forget welcome email + internal signup alerts.
+        if (signUpData?.user?.id) {
+          supabase.functions.invoke('send-signup-emails', {
             body: {
-              templateName: 'internal-signup-alert',
-              recipientEmail: notifyEmail,
-              idempotencyKey: `internal-signup-alert-${notifyEmail}-${signUpData?.user?.id ?? email}`,
-              templateData: {
-                email,
-                firstName: firstName.trim(),
-                businessName: businessName.trim(),
-                businessType: businessType?.trim?.() || '',
-                signedUpAt: new Date().toISOString(),
-                referralSource,
-              },
+              userId: signUpData.user.id,
+              firstName: firstName.trim(),
+              businessName: businessName.trim(),
+              businessType: businessType?.trim?.() || '',
+              referralSource,
             },
-          }).catch((e) => console.warn('internal signup alert failed', e));
-        });
+          }).catch((e) => console.warn('signup emails failed', e));
+        }
 
         setPendingVerificationEmail(email);
         toast.success('Check your email to verify your account.');
@@ -353,10 +358,23 @@ export default function Auth() {
               </div>
               <CardTitle className="text-2xl">Waiting to verify account</CardTitle>
               <CardDescription>
-                We sent a verification link to <span className="font-medium text-foreground">{pendingVerificationEmail}</span>. Click it from this device to continue setting up your account.
+                We sent a verification link to <span className="font-medium text-foreground">{pendingVerificationEmail}</span>. Click the link, or type the code from the email below.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <form onSubmit={handleVerifyCode} className="space-y-2">
+                <Input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="Enter the code from the email"
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  className="text-center text-lg tracking-widest"
+                />
+                <Button type="submit" className="w-full" disabled={verifyingCode || verifyCode.length < 6}>
+                  {verifyingCode ? 'Verifying...' : 'Verify code'}
+                </Button>
+              </form>
               <p className="text-center text-sm text-muted-foreground">
                 Didn't get the email? Check your spam folder or resend it below.
               </p>

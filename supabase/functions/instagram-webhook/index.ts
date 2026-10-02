@@ -6,7 +6,6 @@ import { replyToInstagramMessage } from '../_shared/instagram-ai.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const VERIFY_TOKEN = Deno.env.get('INSTAGRAM_VERIFY_TOKEN') ?? '';
-const INSTAGRAM_GRAPH_VERSION = 'v25.0';
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
@@ -15,7 +14,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
 async function igProfile(igsid: string, token: string) {
   try {
     const res = await fetch(
-      `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/${igsid}?fields=name,username&access_token=${encodeURIComponent(token)}`,
+      `https://graph.facebook.com/v21.0/${igsid}?fields=name,username&access_token=${encodeURIComponent(token)}`,
     );
     if (!res.ok) return null;
     return (await res.json()) as { name?: string; username?: string };
@@ -137,7 +136,7 @@ Deno.serve(async (req) => {
               tenantId: cred.tenant_id,
               contactId: contact.id,
               igsid,
-              senderId: cred.ig_account_id || cred.page_id || recipientId!,
+              senderId: cred.page_id || cred.ig_account_id || recipientId!,
               accessToken: cred.access_token,
               userMessage: text,
             });
