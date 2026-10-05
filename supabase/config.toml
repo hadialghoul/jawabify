@@ -60,6 +60,10 @@ project_id = "qemxlbjwpxyljkansqsl"
 
   [functions.instagram-compliance]
     verify_jwt = false
+  [functions.whatsapp-connect-bridge]
+    verify_jwt = false
+  [functions.meta-exchange-token]
+    verify_jwt = false
   [functions.seed-reviewer-account]
     verify_jwt = false
 

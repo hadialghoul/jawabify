@@ -61,6 +61,10 @@ const WhatsAppApiGuide = lazyWithRetry(() => import("./pages/marketing/WhatsAppA
 const WhatsAppPricingGuide = lazyWithRetry(() => import("./pages/marketing/WhatsAppPricingGuide"));
 const Info = lazyWithRetry(() => import("./pages/Info"));
 const GoogleCalendarReturn = lazyWithRetry(() => import("./pages/oauth/GoogleCalendarReturn"));
+const FacebookOAuthReturn = lazyWithRetry(() => import("./pages/oauth/FacebookOAuthReturn"));
+const FacebookOAuthStart = lazyWithRetry(() => import("./pages/oauth/FacebookOAuthStart"));
+const WhatsAppConnectBridge = lazyWithRetry(() => import("./pages/oauth/WhatsAppConnectBridge"));
+const WhatsAppConnectDone = lazyWithRetry(() => import("./pages/oauth/WhatsAppConnectDone"));
 const Settings = lazyWithRetry(() => import("./pages/Settings"));
 const Integrations = lazyWithRetry(() => import("./pages/Integrations"));
 const Account = lazyWithRetry(() => import("./pages/Account"));
@@ -241,6 +245,10 @@ const AppRoutes = () => {
         <Route path="/info" element={<Info />} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/oauth/google-calendar/return" element={<GoogleCalendarReturn />} />
+        <Route path="/oauth/facebook/start" element={<FacebookOAuthStart />} />
+        <Route path="/oauth/facebook/return" element={<FacebookOAuthReturn />} />
+        <Route path="/oauth/whatsapp-connect" element={<WhatsAppConnectBridge />} />
+        <Route path="/oauth/whatsapp-done" element={<WhatsAppConnectDone />} />
         <Route path="/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
 
         <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />

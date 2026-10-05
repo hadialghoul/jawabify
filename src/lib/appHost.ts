@@ -64,6 +64,11 @@ const PRODUCT_PATHS = [
   '/super-admin',
   '/subscribe',
   '/checkout/return',
+  '/oauth/facebook/start',
+  '/oauth/facebook/return',
+  '/oauth/whatsapp-connect',
+  '/oauth/whatsapp-done',
+  '/oauth/google-calendar/return',
 ];
 
 export function isProductPath(pathname: string): boolean {
