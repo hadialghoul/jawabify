@@ -219,8 +219,13 @@ export async function replyToInstagramMessage(opts: {
   if (!reply) return false;
 
   // ===== Send =====
+  // Instagram Login tokens (IG...) must use graph.instagram.com; Facebook Page
+  // tokens (EAA...) use graph.facebook.com.
+  const sendBase = accessToken.startsWith('IG')
+    ? 'https://graph.instagram.com/v21.0/me'
+    : `https://graph.facebook.com/v21.0/${senderId}`;
   const sendRes = await fetch(
-    `https://graph.facebook.com/v21.0/${senderId}/messages?access_token=${encodeURIComponent(accessToken)}`,
+    `${sendBase}/messages?access_token=${encodeURIComponent(accessToken)}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -6,11 +7,27 @@ import { useInstagramConnect } from '@/hooks/useInstagramConnect';
 interface Props extends Omit<ButtonProps, 'onClick'> {
   onConnected?: () => void;
   label?: string;
+  /** Start Facebook Login as soon as this button mounts (used by the mobile app deep-link). */
+  autoStart?: boolean;
 }
 
-/** "Continue with Facebook" button that links an Instagram account via its Facebook Page. */
-export function InstagramConnectButton({ onConnected, label = 'Connect with Facebook', ...buttonProps }: Props) {
-  const { connecting, startConnect, pages, selectPage, cancelPageSelection } = useInstagramConnect(onConnected);
+/**
+ * Instagram Direct connect via Facebook Login.
+ * Section branding stays Instagram; the button label is "Connect with Facebook".
+ */
+export function InstagramConnectButton({
+  onConnected,
+  label = 'Connect with Facebook',
+  autoStart = false,
+  ...buttonProps
+}: Props) {
+  const { connecting, startConnect, pages, selectPage, cancelPageSelection } =
+    useInstagramConnect(onConnected);
+
+  useEffect(() => {
+    if (autoStart) startConnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   return (
     <>
@@ -22,7 +39,9 @@ export function InstagramConnectButton({ onConnected, label = 'Connect with Face
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Choose the Instagram account</DialogTitle>
-            <DialogDescription>Pick the Facebook Page whose Instagram account should reply in Jawabify.</DialogDescription>
+            <DialogDescription>
+              Pick the Facebook Page whose Instagram account should reply in Jawabify.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             {pages?.map((p) => (

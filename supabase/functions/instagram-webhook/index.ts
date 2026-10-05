@@ -13,8 +13,9 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
 
 async function igProfile(igsid: string, token: string) {
   try {
+    const host = token.startsWith('IG') ? 'graph.instagram.com' : 'graph.facebook.com';
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${igsid}?fields=name,username&access_token=${encodeURIComponent(token)}`,
+      `https://${host}/v21.0/${igsid}?fields=name,username&access_token=${encodeURIComponent(token)}`,
     );
     if (!res.ok) return null;
     return (await res.json()) as { name?: string; username?: string };

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ArrowLeft, Instagram, Loader2, CheckCircle2 } from 'lucide-react';
 import { useGoBack } from '@/hooks/useGoBack';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,15 @@ export default function Integrations() {
   const goBack = useGoBack('/settings');
   const { tenantId } = useAuth();
   const instagram = useInstagramConnection();
+  const [autoStartFacebook, setAutoStartFacebook] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('connect') === 'facebook') {
+      window.history.replaceState({}, '', '/integrations');
+      setAutoStartFacebook(true);
+    }
+  }, []);
 
   const disconnectInstagram = async () => {
     if (!tenantId) return;
@@ -69,14 +79,18 @@ export default function Integrations() {
             <ol className="space-y-1.5 text-sm text-muted-foreground">
               <li>1. Make your Instagram a Business account and link it to your Facebook Page.</li>
               <li>2. In Instagram, turn on Settings → Messages → Connected tools → Allow access to messages.</li>
-              <li>3. Continue with Facebook, select that Page, and approve the permissions.</li>
+              <li>3. Connect with Facebook, select that Page, and approve the permissions.</li>
             </ol>
             {instagram.connected ? (
               <Button variant="outline" onClick={disconnectInstagram}>
                 Disconnect Instagram
               </Button>
             ) : (
-              <InstagramConnectButton onConnected={() => instagram.refresh()} label="Continue with Facebook" />
+              <InstagramConnectButton
+                onConnected={() => instagram.refresh()}
+                label="Connect with Facebook"
+                autoStart={autoStartFacebook}
+              />
             )}
             <p className="text-xs text-muted-foreground">
               Instagram allows replies only within 24 hours of the customer's last message.

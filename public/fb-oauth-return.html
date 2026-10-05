@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Returning to Jawabify…</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: system-ui, sans-serif;
+        color: #64748b;
+        background: #f8fafc;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="msg">Returning to Jawabify…</p>
+    <script>
+      // Facebook may return access_token in the hash. Move it to the query so
+      // Expo AuthSession on Android can read it and close the browser.
+      (function () {
+        var hash = window.location.hash.replace(/^#/, '');
+        if (!hash) return;
+        var hp = new URLSearchParams(hash);
+        var token = hp.get('access_token');
+        var err = hp.get('error_description') || hp.get('error');
+        if (!token && !err) return;
+        if (window.location.search.indexOf('access_token') !== -1) return;
+        var next = new URLSearchParams();
+        if (token) next.set('access_token', token);
+        if (err) next.set('error', err);
+        var expires = hp.get('expires_in');
+        if (expires) next.set('expires_in', expires);
+        document.getElementById('msg').textContent = 'Finishing Facebook login…';
+        window.location.replace(window.location.pathname + '?' + next.toString());
+      })();
+    </script>
+  </body>
+</html>

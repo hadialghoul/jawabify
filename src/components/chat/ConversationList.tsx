@@ -256,7 +256,7 @@ export function ConversationList({
                 key={key}
                 role="tab"
                 aria-selected={channel === key}
-                title={key === 'instagram' && !instagramConnected ? 'Connect Instagram' : label}
+                title={key === 'instagram' && !instagramConnected ? 'Connect with Facebook' : label}
                 onClick={() => {
                   if (key === 'instagram' && !instagramConnected) {
                     navigate('/integrations');

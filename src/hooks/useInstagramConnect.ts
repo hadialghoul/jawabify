@@ -12,16 +12,28 @@ export const INSTAGRAM_FB_SCOPES = [
   'pages_show_list',
 ].join(',');
 
+/** Canonical OAuth return path (must match Meta app Valid OAuth Redirect URIs). */
+export const INSTAGRAM_OAUTH_REDIRECT_PATH = '/integrations';
+
 export interface InstagramPageOption {
   pageId: string;
   pageName: string;
   igUsername: string | null;
 }
 
+function oauthRedirectUrl() {
+  return `${window.location.origin}${INSTAGRAM_OAUTH_REDIRECT_PATH}`;
+}
+
+function persistOAuthState(state: string) {
+  window.sessionStorage.setItem('instagram_oauth_state', state);
+  window.localStorage.setItem('instagram_oauth_state', state);
+}
+
 /**
- * Connects Instagram DMs through Facebook Login: the user signs in with
- * Facebook, picks the Page linked to their Instagram professional account,
- * and the backend stores the Page token and subscribes it to messages.
+ * Connects Instagram DMs:
+ * 1. Primary — Instagram Business Login (redirect to Instagram, return with ?code=)
+ * 2. Fallback — Facebook Login + Page linked to the IG professional account
  */
 export function useInstagramConnect(onConnected?: () => void) {
   const [connecting, setConnecting] = useState(false);
@@ -57,10 +69,38 @@ export function useInstagramConnect(onConnected?: () => void) {
     [onConnected],
   );
 
+  /** Primary: open Instagram's own OAuth login, then return to /integrations?code=... */
+  const startInstagramLogin = useCallback(async () => {
+    setConnecting(true);
+    try {
+      const redirectTo = oauthRedirectUrl();
+      const { data, error } = await supabase.functions.invoke('instagram-connect', {
+        headers: actingHeaders(),
+        body: { action: 'start', redirectTo },
+      });
+      if (error) throw error;
+      if (!data?.authUrl || !data?.state) {
+        throw new Error(data?.error || 'No authorization URL returned');
+      }
+      persistOAuthState(data.state);
+      if (isNativeApp()) {
+        await openSystemBrowser(data.authUrl);
+        setConnecting(false);
+        return;
+      }
+      window.location.href = data.authUrl;
+    } catch (err: any) {
+      console.error(err);
+      setConnecting(false);
+      toast.error("Couldn't start the Instagram connection", {
+        description: err?.message || 'Please try again in a moment.',
+      });
+    }
+  }, []);
+
+  /** Fallback: Facebook Login SDK → Page picker → store Page token. */
   const startConnect = useCallback(async () => {
     setConnecting(true);
-    // On native, Facebook Login must leave the WebView (store / cookie rules).
-    // Temporarily route window.open to the Capacitor Browser plugin.
     let restoreOpen: (() => void) | undefined;
     try {
       if (isNativeApp()) {
@@ -93,7 +133,9 @@ export function useInstagramConnect(onConnected?: () => void) {
       restoreOpen?.();
       console.error(err);
       setConnecting(false);
-      toast.error("Couldn't open Facebook login", { description: 'Please disable popup/ad blockers and try again.' });
+      toast.error("Couldn't open Facebook login", {
+        description: 'Please disable popup/ad blockers and try again.',
+      });
     }
   }, [finalize]);
 
@@ -102,5 +144,12 @@ export function useInstagramConnect(onConnected?: () => void) {
     tokenRef.current = null;
   }, []);
 
-  return { connecting, startConnect, pages, selectPage: finalize, cancelPageSelection };
+  return {
+    connecting,
+    startInstagramLogin,
+    startConnect,
+    pages,
+    selectPage: finalize,
+    cancelPageSelection,
+  };
 }

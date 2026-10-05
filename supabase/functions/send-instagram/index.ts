@@ -70,8 +70,11 @@ Deno.serve(async (req) => {
       : { recipient: { id: contact.external_id }, message: { text: message } };
 
 
+    const sendBase = cred.access_token.startsWith('IG')
+      ? 'https://graph.instagram.com/v21.0/me'
+      : `https://graph.facebook.com/v21.0/${senderId}`;
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${senderId}/messages?access_token=${encodeURIComponent(cred.access_token)}`,
+      `${sendBase}/messages?access_token=${encodeURIComponent(cred.access_token)}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
     );
     const result = await res.json().catch(() => ({}));
