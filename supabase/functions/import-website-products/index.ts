@@ -72,7 +72,7 @@ async function fetchText(url: string, timeoutMs = 12000): Promise<string | null>
 async function fetchReadableText(url: string): Promise<string | null> {
   const html = await fetchText(url);
   const staticText = html ? htmlToText(html) : "";
-  const looksUsable = staticText.length > 600 && /(\$|USD|EUR|LBP|£|€|\d+[.,]\d{2})/i.test(staticText);
+  const looksUsable = staticText.length > 600 && /(\$|USD|EUR|LBP|آ£|â‚¬|\d+[.,]\d{2})/i.test(staticText);
   if (looksUsable) return staticText;
 
   const rendered = await fetchText(`https://r.jina.ai/${url}`, 30000);
@@ -121,8 +121,8 @@ async function embedBatch(texts: string[], apiKey: string): Promise<Array<number
   }
 }
 
-const SIZE_OPTION = /size|siz|مقاس|قياس|shoe/i;
-const COLOR_OPTION = /colou?r|لون/i;
+const SIZE_OPTION = /size|siz|ظ…ظ‚ط§ط³|ظ‚ظٹط§ط³|shoe/i;
+const COLOR_OPTION = /colou?r|ظ„ظˆظ†/i;
 
 /** Fetch one page of a Shopify storefront JSON feed and map it to products. */
 async function fetchShopifyPage(base: string, page: number, currency: string): Promise<Product[] | null> {
@@ -384,7 +384,7 @@ ${text.slice(0, 24000)}`;
 
 /**
  * Service businesses: pull the SERVICES a site offers (name, what it includes,
- * duration, price when shown) — never physical products. When the site lists no
+ * duration, price when shown) â€” never physical products. When the site lists no
  * services at all, fall back to an "about the business" paragraph.
  */
 async function extractServicesFromText(
@@ -584,7 +584,7 @@ Deno.serve(async (req) => {
 
     // ---------------------------------------------------------------------
     // SERVICE BUSINESSES: import the services the website offers (never
-    // products). No services on the site → save an "about" paragraph instead.
+    // products). No services on the site â†’ save an "about" paragraph instead.
     // ---------------------------------------------------------------------
     if (body?.vertical === "service" || body?.mode === "services") {
       const replacedSvc = await purgeAll();
@@ -640,8 +640,9 @@ Deno.serve(async (req) => {
       if (!about) {
         return json({
           error: "Couldn't read any services or an about section from that website. Try a direct services page URL, or upload your service list as a file.",
+          done: true,
           site: origin,
-        }, 400);
+        });
       }
       const title = `About ${new URL(origin).hostname}`;
       const [emb] = await embedBatch([`${title}\n${about}`], LOVABLE_API_KEY);
@@ -713,7 +714,7 @@ Deno.serve(async (req) => {
       }
 
       if (pending.length) {
-        // Dedupe inside this batch by product link (handle) — titles repeat across
+        // Dedupe inside this batch by product link (handle) â€” titles repeat across
         // colour/size listings, so title-based dedupe silently dropped products.
         const seen = new Set<string>();
         const fresh = pending.filter((p) => {
@@ -734,13 +735,13 @@ Deno.serve(async (req) => {
       if (feedFinished) {
         feed++;
         page = 1;
-        // Root feed already produced a catalogue → don't re-scan the mirror feed.
+        // Root feed already produced a catalogue â†’ don't re-scan the mirror feed.
         if (feed === 1 && total > 0) feed = 2;
         if (feed >= 2) break;
         continue;
       }
 
-      // More pages left in this feed — hand control back to the client.
+      // More pages left in this feed â€” hand control back to the client.
       return json({
         done: false,
         cursor: { feed, page, total },
@@ -796,7 +797,7 @@ Deno.serve(async (req) => {
       };
 
       // 1) Catalogue/listing pages usually contain every product + price on one
-      //    page — far cheaper and faster than crawling each product page.
+      //    page â€” far cheaper and faster than crawling each product page.
       const listingPages = [...new Set([
         rawUrl,
         `${origin}/shop`,
@@ -823,9 +824,10 @@ Deno.serve(async (req) => {
       if (products.length === 0) {
         return json({
           error: "No products with prices found on that website. Try a direct product/shop page URL, or import a CSV/Excel file instead.",
+          done: true,
           pages_read: pagesRead,
           site: origin,
-        }, 400);
+        });
       }
 
 
