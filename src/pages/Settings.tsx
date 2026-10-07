@@ -139,6 +139,8 @@ export default function Settings() {
   const [importSource, setImportSource] = useState<'website' | 'shopify' | 'file'>('website');
   // Service businesses have no product catalog to import — file upload only.
   const isServiceVertical = tenantVertical === 'service';
+  // Restaurants use MenuManager / MenuFileImportCard — not website/Shopify product import.
+  const isRestaurantVertical = tenantVertical === 'restaurant';
   useEffect(() => {
     if (isServiceVertical) setImportSource('file');
   }, [isServiceVertical]);
@@ -1707,7 +1709,8 @@ export default function Settings() {
                    : 'Add all information the AI needs to respond to customers. This can include product details, pricing, FAQs, policies, and any other relevant information.'}
                </p>
 
-              {/* Unified import: website / Shopify / file */}
+              {/* Unified import: website / Shopify / file — hidden for restaurants (menu import lives in Menu) */}
+              {!isRestaurantVertical && (
               <Card className="border-dashed">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -2058,6 +2061,7 @@ export default function Settings() {
                   {importSource === 'file' && <FileImportCard embedded />}
                 </CardContent>
               </Card>
+              )}
 
 
 

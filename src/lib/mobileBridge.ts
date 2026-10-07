@@ -2,8 +2,12 @@
 // web bundle keeps working in the browser.
 
 import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { APP_ORIGIN } from "@/lib/appHost";
+
+/** Custom URL scheme from capacitor.config.ts ios.scheme */
+export const NATIVE_APP_SCHEME = "Jawabify://";
 
 declare global {
   interface Window {
@@ -48,8 +52,55 @@ export function waitForSystemBrowserClosed(): Promise<void> {
 }
 
 /** Store-safe subscribe: never render Stripe card UI inside the native app. */
-export async function openSubscribeInBrowser(): Promise<void> {
-  await openSystemBrowser(`${APP_ORIGIN}/subscribe`);
+export async function openSubscribeInBrowser(plan?: "starter" | "growth"): Promise<void> {
+  const qs = plan ? `?plan=${encodeURIComponent(plan)}` : "";
+  await openSystemBrowser(`${APP_ORIGIN}/subscribe${qs}`);
+}
+
+/**
+ * Opens an OAuth URL in the system browser and resolves when the app is
+ * reopened via a Jawabify:// deep link (see FacebookOAuthReturn).
+ */
+export function openAuthSession(authUrl: string): Promise<string> {
+  if (!isNativeApp()) {
+    return Promise.reject(new Error("Auth session is only available in the native app."));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const listeners: Array<{ remove: () => Promise<void> }> = [];
+
+    const cleanup = () => {
+      void Promise.all(listeners.map((l) => l.remove()));
+    };
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      cleanup();
+      fn();
+    };
+
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("Sign-in timed out. Please try again.")));
+    }, 5 * 60 * 1000);
+
+    void App.addListener("appUrlOpen", (event) => {
+      const url = event.url;
+      if (!url.toLowerCase().startsWith(NATIVE_APP_SCHEME.toLowerCase())) return;
+      void Browser.close();
+      finish(() => resolve(url));
+    }).then((l) => listeners.push(l));
+
+    void Browser.addListener("browserFinished", () => {
+      finish(() => reject(new Error("Sign-in was cancelled.")));
+    }).then((l) => listeners.push(l));
+
+    void Browser.open({ url: authUrl, presentationStyle: "fullscreen" }).catch((e) => {
+      finish(() => reject(e instanceof Error ? e : new Error("Could not open sign-in.")));
+    });
+  });
 }
 
 export function identifyMobileUser(userId: string) {

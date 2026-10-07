@@ -66,6 +66,8 @@ const PRODUCT_PATHS = [
   '/checkout/return',
   '/oauth/facebook/start',
   '/oauth/facebook/return',
+  '/oauth/billing/return',
+  '/oauth/billing/checkout',
   '/oauth/whatsapp-connect',
   '/oauth/whatsapp-done',
   '/oauth/google-calendar/return',

@@ -64,12 +64,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { priceId, returnUrl, environment } = await req.json();
+    const { priceId, returnUrl, environment, uiMode, cancelUrl } = await req.json();
     if (!priceId || !returnUrl || !environment) {
       return new Response(JSON.stringify({ error: 'Missing fields' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    const hosted = uiMode === 'hosted';
     if (!/^[a-zA-Z0-9_-]+$/.test(priceId)) throw new Error("Invalid priceId");
 
     const token = req.headers.get('Authorization')?.replace('Bearer ', '');
@@ -183,19 +184,36 @@ Deno.serve(async (req) => {
       console.error('subscriptions.list failed, defaulting to trial-eligible:', e);
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const shared = {
       line_items: [{ price: stripePrice.id, quantity: 1 }],
-      mode: 'subscription',
-      ui_mode: 'embedded_page',
-      return_url: returnUrl,
+      mode: 'subscription' as const,
       customer: customerId,
-      customer_update: { address: 'auto', name: 'auto' },
+      customer_update: { address: 'auto' as const, name: 'auto' as const },
       ...(env !== "live" && { automatic_tax: { enabled: true } }),
       subscription_data: {
         metadata: { userId: user.id },
         ...(!hasHadSub && { trial_period_days: 7 }),
       },
       metadata: { userId: user.id },
+    };
+
+    // Mobile apps use hosted Checkout (full-page URL) so Stripe can redirect
+    // back to a deep-link bridge without embedding Stripe.js in the RN shell.
+    if (hosted) {
+      const session = await stripe.checkout.sessions.create({
+        ...shared,
+        success_url: returnUrl,
+        cancel_url: typeof cancelUrl === 'string' && cancelUrl ? cancelUrl : returnUrl,
+      });
+      return new Response(JSON.stringify({ url: session.url }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      ...shared,
+      ui_mode: 'embedded_page',
+      return_url: returnUrl,
     });
 
     return new Response(JSON.stringify({ clientSecret: session.client_secret }), {

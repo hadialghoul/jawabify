@@ -3,14 +3,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { actingHeaders } from '@/lib/actingTenant';
 import { loadFacebookSdk } from '@/lib/facebookSdk';
-import { isNativeApp, openSystemBrowser } from '@/lib/mobileBridge';
+import {
+  buildFacebookAuthUrl,
+  FACEBOOK_OAUTH_REDIRECT,
+  INSTAGRAM_FB_SCOPES,
+  parseFacebookCallback,
+} from '@/lib/facebookOAuth';
+import { isNativeApp, openAuthSession, openSystemBrowser } from '@/lib/mobileBridge';
 
-/** Permissions requested through Facebook Login for Instagram messaging. */
-export const INSTAGRAM_FB_SCOPES = [
-  'instagram_basic',
-  'instagram_manage_messages',
-  'pages_show_list',
-].join(',');
+export { INSTAGRAM_FB_SCOPES };
 
 /** Canonical OAuth return path (must match Meta app Valid OAuth Redirect URIs). */
 export const INSTAGRAM_OAUTH_REDIRECT_PATH = '/integrations';
@@ -69,6 +70,41 @@ export function useInstagramConnect(onConnected?: () => void) {
     [onConnected],
   );
 
+  const exchangeFacebookCode = useCallback(
+    async (code: string, pageId?: string) => {
+      setConnecting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('instagram-connect', {
+          headers: actingHeaders(),
+          body: {
+            action: 'facebook_oauth_exchange',
+            code,
+            redirectTo: FACEBOOK_OAUTH_REDIRECT,
+            pageId,
+          },
+        });
+        if (error) throw error;
+        if (data?.needsPageSelection && Array.isArray(data.pages) && data?.userAccessToken) {
+          tokenRef.current = data.userAccessToken;
+          setPages(data.pages);
+          return;
+        }
+        if (!data?.success) {
+          throw new Error(data?.error || 'Instagram connection failed');
+        }
+        setPages(null);
+        tokenRef.current = null;
+        toast.success(`Instagram connected${data.username ? ` (@${data.username})` : ''}`);
+        onConnected?.();
+      } catch (err: any) {
+        toast.error('Instagram connection failed', { description: err?.message });
+      } finally {
+        setConnecting(false);
+      }
+    },
+    [onConnected],
+  );
+
   /** Primary: open Instagram's own OAuth login, then return to /integrations?code=... */
   const startInstagramLogin = useCallback(async () => {
     setConnecting(true);
@@ -86,6 +122,7 @@ export function useInstagramConnect(onConnected?: () => void) {
       if (isNativeApp()) {
         await openSystemBrowser(data.authUrl);
         setConnecting(false);
+        toast.message('Return here after finishing Instagram sign-in.');
         return;
       }
       window.location.href = data.authUrl;
@@ -98,26 +135,31 @@ export function useInstagramConnect(onConnected?: () => void) {
     }
   }, []);
 
-  /** Fallback: Facebook Login SDK → Page picker → store Page token. */
+  /** Facebook Login → Page picker → store Page token. */
   const startConnect = useCallback(async () => {
     setConnecting(true);
-    let restoreOpen: (() => void) | undefined;
     try {
       if (isNativeApp()) {
-        const originalOpen = window.open.bind(window);
-        window.open = ((url?: string | URL, ..._args: any[]) => {
-          if (url) void openSystemBrowser(String(url));
-          return null;
-        }) as typeof window.open;
-        restoreOpen = () => {
-          window.open = originalOpen;
-        };
+        const callbackUrl = await openAuthSession(buildFacebookAuthUrl());
+        const { code, accessToken, error } = parseFacebookCallback(callbackUrl);
+        if (error) {
+          throw new Error(error);
+        }
+        if (code) {
+          await exchangeFacebookCode(code);
+          return;
+        }
+        if (accessToken) {
+          tokenRef.current = accessToken;
+          await finalize();
+          return;
+        }
+        throw new Error('Facebook did not return a login code.');
       }
 
       const FB = await loadFacebookSdk();
       FB.login(
         (response: any) => {
-          restoreOpen?.();
           const token = response?.authResponse?.accessToken;
           if (!token) {
             setConnecting(false);
@@ -129,15 +171,14 @@ export function useInstagramConnect(onConnected?: () => void) {
         },
         { scope: INSTAGRAM_FB_SCOPES, return_scopes: true, auth_type: 'rerequest' },
       );
-    } catch (err) {
-      restoreOpen?.();
+    } catch (err: any) {
       console.error(err);
       setConnecting(false);
       toast.error("Couldn't open Facebook login", {
-        description: 'Please disable popup/ad blockers and try again.',
+        description: err?.message || 'Please try again.',
       });
     }
-  }, [finalize]);
+  }, [exchangeFacebookCode, finalize]);
 
   const cancelPageSelection = useCallback(() => {
     setPages(null);
