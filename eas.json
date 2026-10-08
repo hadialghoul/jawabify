@@ -41,6 +41,21 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {},
+      "android": {
+        "track": "production",
+        "releaseStatus": "draft",
+        "serviceAccountKeyPath": "./play-service-account.json"
+      }
+    },
+    "internal": {
+      "ios": {},
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed",
+        "serviceAccountKeyPath": "./play-service-account.json"
+      }
+    }
   }
 }

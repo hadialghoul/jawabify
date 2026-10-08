@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './src/hooks/useAuth';
 import { ToastProvider } from './src/hooks/useToast';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { WhatsAppConnectHost } from './src/components/WhatsAppConnectHost';
+import { StripeCheckoutHost } from './src/components/StripeCheckoutHost';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,7 +22,10 @@ export default function App() {
           <ToastProvider>
             <AuthProvider>
               <RootNavigator />
+              <WhatsAppConnectHost />
+              <StripeCheckoutHost />
               <StatusBar style="light" />
+
             </AuthProvider>
           </ToastProvider>
         </QueryClientProvider>

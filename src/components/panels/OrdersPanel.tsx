@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatDistanceToNow } from 'date-fns';
-import { Package, Plus, RefreshCw, Trash2 } from 'lucide-react-native';
-import type { Contact, Order } from '../../types';
+import { Package, Plus, Printer, RefreshCw, Trash2 } from 'lucide-react-native';
+import type { Order } from '../../types';
 import { colors, radius } from '../../theme';
 import { Badge, Button, Input } from '../ui';
 import { supabase } from '../../lib/supabase';
 import { actingHeaders } from '../../lib/actingTenant';
+import { printOrderInvoice } from '../../lib/printInvoice';
 import { useToast } from '../../hooks/useToast';
 import { KeyboardSheet } from '../KeyboardSheet';
 
@@ -80,6 +81,19 @@ export function OrdersPanel({
               <View style={styles.cardTop}>
                 <Text style={styles.id}>#{order.displayId}</Text>
                 <Badge label={STATUS[order.status].label} tone={STATUS[order.status].tone} />
+                <Pressable
+                  onPress={async () => {
+                    try {
+                      await printOrderInvoice(order);
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Could not share invoice');
+                    }
+                  }}
+                  hitSlop={8}
+                  accessibilityLabel="Print invoice"
+                >
+                  <Printer size={16} color={colors.foreground} />
+                </Pressable>
                 <Pressable
                   onPress={() =>
                     Alert.alert('Delete order', 'Remove this order?', [

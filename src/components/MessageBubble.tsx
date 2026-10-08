@@ -1,8 +1,10 @@
+import { useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { AlertCircle, Check, CheckCheck, Clock } from 'lucide-react-native';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { AlertCircle, Check, CheckCheck, Clock, Mic, Pause, Play } from 'lucide-react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Message } from '../types';
-import { isImageType, mediaPlaceholder } from '../lib/chatMedia';
+import { looksLikeAudio, looksLikeImage, mediaPlaceholder } from '../lib/chatMedia';
 import { colors, radius } from '../theme';
 
 const PLACEHOLDERS = ['📷 Photo', '🎤 Voice message', '🎬 Video'];
@@ -16,7 +18,11 @@ export function MessageBubble({
 }) {
   const isOutgoing = message.direction === 'outgoing';
   const hasMedia = !!message.mediaUrl;
-  const hasImage = hasMedia && isImageType(message.mediaType);
+  const hasImage = looksLikeImage(message.mediaType, message.mediaUrl);
+  const hasAudio = looksLikeAudio(message.mediaType, message.mediaUrl);
+  const [playing, setPlaying] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const placeholder = mediaPlaceholder(message.mediaType);
   const hideContent = hasMedia && (PLACEHOLDERS.includes(message.content) || message.content === placeholder);
 
@@ -33,8 +39,41 @@ export function MessageBubble({
   return (
     <Pressable onLongPress={onLongPress} style={[styles.row, isOutgoing ? styles.end : styles.start]}>
       <View style={[styles.bubble, isOutgoing ? styles.sent : styles.received, hasImage && { padding: 0 }]}>
-        {hasImage ? <Image source={{ uri: message.mediaUrl }} style={styles.image} /> : null}
-        {hasMedia && !hasImage ? (
+        {hasImage ? (
+          <Pressable onPress={() => setPhotoOpen(true)}>
+            <Image source={{ uri: message.mediaUrl }} style={styles.image} />
+          </Pressable>
+        ) : null}
+        {hasAudio ? (
+          <Pressable
+            style={styles.audio}
+            onPress={async () => {
+              if (!message.mediaUrl) return;
+              try {
+                if (playerRef.current && playing) {
+                  playerRef.current.pause();
+                  setPlaying(false);
+                  return;
+                }
+                await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+                const player = playerRef.current ?? createAudioPlayer(message.mediaUrl);
+                playerRef.current = player;
+                setPlaying(true);
+                player.play();
+                player.addListener('playbackStatusUpdate', (status) => {
+                  if (status.didJustFinish) setPlaying(false);
+                });
+              } catch {
+                setPlaying(false);
+              }
+            }}
+          >
+            {playing ? <Pause size={16} color={isOutgoing ? '#fff' : colors.primary} /> : <Play size={16} color={isOutgoing ? '#fff' : colors.primary} />}
+            <Mic size={16} color={isOutgoing ? '#fff' : colors.primary} />
+            <Text style={[styles.body, isOutgoing && styles.sentText]}>Voice message</Text>
+          </Pressable>
+        ) : null}
+        {hasMedia && !hasImage && !hasAudio ? (
           <Text style={[styles.body, isOutgoing && styles.sentText]}>{placeholder}</Text>
         ) : null}
         {message.content && !hideContent ? (
@@ -47,6 +86,11 @@ export function MessageBubble({
           <Status />
         </View>
       </View>
+      <Modal visible={photoOpen} transparent animationType="fade" onRequestClose={() => setPhotoOpen(false)}>
+        <Pressable style={styles.lightbox} onPress={() => setPhotoOpen(false)}>
+          {message.mediaUrl ? <Image source={{ uri: message.mediaUrl }} style={styles.lightboxImage} resizeMode="contain" /> : null}
+        </Pressable>
+      </Modal>
     </Pressable>
   );
 }
@@ -64,4 +108,7 @@ const styles = StyleSheet.create({
   time: { fontSize: 11, color: colors.mutedForeground },
   sentMeta: { color: 'rgba(255,255,255,0.7)' },
   image: { width: 220, height: 180, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl },
+  audio: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 160 },
+  lightbox: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
+  lightboxImage: { width: '100%', height: '80%' },
 });

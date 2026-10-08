@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   FlaskConical,
   Briefcase,
+  MessageCircleQuestion,
   MoreHorizontal,
   Headphones,
   Phone,
@@ -54,9 +55,12 @@ const COMMON_TAIL: NavItem[] = [
 
 const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
   ecommerce: [
-    ...COMMON_HEAD,
+    { key: 'chats', label: 'Chats', icon: MessageSquare },
     { key: 'orders', label: 'Orders', icon: Package },
     { key: 'crm', label: 'CRM', icon: Users },
+    // Keep in the bottom bar (first 4) so it matches the website — not buried under More.
+    { key: 'no_order', label: 'No order yet', icon: MessageCircleQuestion },
+    { key: 'home', label: 'Overview', icon: LayoutDashboard },
     { key: 'interested', label: 'Interested', icon: Star },
     { key: 'flagged', label: 'Flagged', icon: Flag },
     { key: 'campaigns', label: 'Campaigns', icon: Megaphone },
@@ -65,6 +69,7 @@ const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
   restaurant: [
     ...COMMON_HEAD,
     { key: 'orders', label: 'Orders', icon: Package },
+    { key: 'no_order', label: 'No order yet', icon: MessageCircleQuestion },
     { key: 'reservations', label: 'Bookings', icon: CalendarDays },
     { key: 'menu', label: 'Menu', icon: BookOpen },
     { key: 'tables', label: 'Tables', icon: LayoutGrid },
@@ -103,12 +108,12 @@ const ITEMS_BY_VERTICAL: Record<string, NavItem[]> = {
     { key: 'enrollments', label: 'Enrollments', icon: GraduationCap },
     ...COMMON_TAIL,
   ],
+  // Service Business: Overview · Services · Calendar · Enquiries · CRM · … — no Staff, Packages, Orders.
   service: [
     ...COMMON_HEAD,
-    { key: 'catalog', label: 'Services', icon: Briefcase },
-    { key: 'sessions', label: 'Bookings', icon: CalendarDays },
-    { key: 'leads', label: 'Leads', icon: UserPlus },
-    { key: 'staff', label: 'Staff', icon: UserRound },
+    { key: 'services', label: 'Services', icon: Briefcase },
+    { key: 'sessions', label: 'Calendar', icon: CalendarDays },
+    { key: 'leads', label: 'Enquiries', icon: UserPlus },
     ...COMMON_TAIL,
   ],
 };

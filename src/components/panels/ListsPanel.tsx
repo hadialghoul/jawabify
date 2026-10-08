@@ -1,24 +1,45 @@
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AlertCircle, CheckCheck, Mail, Percent, ShoppingCart, Sparkles, TrendingUp, UserRound, Users } from 'lucide-react-native';
+import {
+  AlertCircle,
+  CheckCheck,
+  Mail,
+  MapPin,
+  MessageCircleQuestion,
+  Pencil,
+  Percent,
+  ShoppingCart,
+  Sparkles,
+  TrendingUp,
+  UserRound,
+  Users,
+} from 'lucide-react-native';
 import { format, isToday, isYesterday, subDays, startOfDay } from 'date-fns';
 import type { Contact, Order } from '../../types';
 import { colors, radius } from '../../theme';
 import { Badge, Button, Input } from '../ui';
 import { digitsOnly, normalizePhoneQuery, sanitizeQuery } from '../../lib/utils';
+import { contactsWithoutOrders } from '../../lib/contactsWithoutOrders';
 import type { FlaggedContact } from '../../hooks/useAppData';
 import { AreaLineChart, ChartCard, CHART_COLORS, DonutChart, HorizontalBarChart } from '../charts';
+import { EditClientSheet, type ClientEdits } from '../crm/EditClientSheet';
 
 export function CrmPanel({
   contacts,
   orders,
   onSelectContact,
+  editable = false,
+  onSaveContact,
 }: {
   contacts: Contact[];
   orders: Order[];
   onSelectContact: (c: Contact) => void;
+  /** Ecommerce: allow editing clients like the website CRM. */
+  editable?: boolean;
+  onSaveContact?: (contactId: string, edits: ClientEdits) => Promise<boolean>;
 }) {
   const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState<Contact | null>(null);
   const ordersByContact = useMemo(() => {
     const m = new Map<string, number>();
     for (const o of orders) if (o.contactId) m.set(o.contactId, (m.get(o.contactId) || 0) + 1);
@@ -32,7 +53,10 @@ export function CrmPanel({
       return (
         c.name?.toLowerCase().includes(q) ||
         (!!phoneQuery && digitsOnly(c.phoneNumber || '').includes(phoneQuery)) ||
-        c.email?.toLowerCase().includes(q)
+        c.email?.toLowerCase().includes(q) ||
+        c.address?.toLowerCase().includes(q) ||
+        c.notes?.toLowerCase().includes(q) ||
+        c.tags?.some((t) => t.toLowerCase().includes(q))
       );
     });
   }, [contacts, query]);
@@ -47,25 +71,128 @@ export function CrmPanel({
         data={rows}
         keyExtractor={(c) => c.id}
         contentContainerStyle={{ padding: 12, gap: 8 }}
+        ListEmptyComponent={<Text style={styles.empty}>No customers found.</Text>}
         renderItem={({ item: c }) => (
           <Pressable onPress={() => onSelectContact(c)} style={styles.card}>
             <View style={styles.avatar}>
               <UserRound size={16} color={colors.primary} />
             </View>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.name}>{c.name}</Text>
               <Text style={styles.meta}>{c.phoneNumber}</Text>
               {c.email ? (
                 <View style={styles.row}>
                   <Mail size={12} color={colors.mutedForeground} />
-                  <Text style={styles.meta}>{c.email}</Text>
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {c.email}
+                  </Text>
                 </View>
               ) : null}
+              {c.address ? (
+                <View style={styles.row}>
+                  <MapPin size={12} color={colors.mutedForeground} />
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {c.address}
+                  </Text>
+                </View>
+              ) : null}
+              {c.tags && c.tags.length > 0 ? (
+                <Text style={styles.meta} numberOfLines={1}>
+                  {c.tags.join(' · ')}
+                </Text>
+              ) : null}
+              {c.notes ? (
+                <Text style={styles.meta} numberOfLines={1}>
+                  {c.notes}
+                </Text>
+              ) : null}
             </View>
-            <Badge label={`${ordersByContact.get(c.id) || 0} orders`} tone="muted" />
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <Badge label={`${ordersByContact.get(c.id) || 0} orders`} tone="muted" />
+              {editable ? (
+                <Pressable
+                  hitSlop={8}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    setEditing(c);
+                  }}
+                  style={styles.editBtn}
+                >
+                  <Pencil size={14} color={colors.primary} />
+                </Pressable>
+              ) : null}
+            </View>
           </Pressable>
         )}
       />
+      {editable && onSaveContact ? (
+        <EditClientSheet
+          contact={editing}
+          visible={!!editing}
+          onClose={() => setEditing(null)}
+          onSave={onSaveContact}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+export function NoOrderPanel({
+  contacts,
+  orders,
+  onSelectContact,
+  onCampaign,
+}: {
+  contacts: Contact[];
+  orders: Order[];
+  onSelectContact: (c: Contact) => void;
+  /** Website parity: jump to Campaigns with this audience. */
+  onCampaign?: () => void;
+}) {
+  const list = useMemo(() => contactsWithoutOrders(contacts, orders), [contacts, orders]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={[styles.head, styles.noOrderHead]}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.h1}>Asked, no order yet</Text>
+          <Text style={styles.sub}>
+            People who messaged you but haven't ordered — follow up while they're still warm.
+          </Text>
+          <Text style={[styles.sub, { marginTop: 4, fontWeight: '700' }]}>{list.length} contacts</Text>
+        </View>
+        {onCampaign && list.length > 0 ? (
+          <Button title={`Campaign (${list.length})`} onPress={onCampaign} />
+        ) : null}
+      </View>
+      {list.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <MessageCircleQuestion size={32} color={colors.mutedForeground} />
+          <Text style={styles.empty}>Everyone who messaged you has ordered. Nice.</Text>
+        </View>
+      ) : (
+        <FlatList
+          style={{ flex: 1 }}
+          data={list}
+          keyExtractor={(c) => c.id}
+          ItemSeparatorComponent={() => <View style={styles.divider} />}
+          renderItem={({ item: c }) => (
+            <Pressable onPress={() => onSelectContact(c)} style={styles.noOrderRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {c.name || c.phoneNumber}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {c.lastMessage || c.phoneNumber}
+                </Text>
+              </View>
+              {c.lastMessageTime ? (
+                <Text style={styles.meta}>{format(c.lastMessageTime, 'M/d/yyyy')}</Text>
+              ) : null}
+            </Pressable>
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -258,6 +385,24 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  editBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+  },
+  noOrderHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  noOrderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: colors.card,
+  },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
   name: { fontWeight: '700', color: colors.foreground },
   meta: { fontSize: 12, color: colors.mutedForeground },
   row: { flexDirection: 'row', alignItems: 'center', gap: 4 },

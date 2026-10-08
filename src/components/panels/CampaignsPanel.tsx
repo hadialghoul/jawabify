@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FileText, Megaphone, Plus, RefreshCw, Send, Trash2 } from 'lucide-react-native';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../lib/supabase';
@@ -10,7 +10,8 @@ import { Badge, Button, Input } from '../ui';
 import { KeyboardSheet } from '../KeyboardSheet';
 import { colors, radius } from '../../theme';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../../config';
-import type { Contact } from '../../types';
+import type { Contact, Order } from '../../types';
+import { contactsWithoutOrders } from '../../lib/contactsWithoutOrders';
 
 interface Campaign {
   id: string;
@@ -40,19 +41,38 @@ const LANGUAGES = [
   { value: 'fr', label: 'French' },
 ];
 
-export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
-  const { tenantId, session } = useAuth();
+export function CampaignsPanel({
+  contacts = [],
+  orders = [],
+  tenantId: tenantOverride,
+  launchAudience,
+  launchKey,
+}: {
+  contacts?: Contact[];
+  orders?: Order[];
+  tenantId?: string;
+  /** When set (e.g. from No order yet → Campaign), open create with that audience. */
+  launchAudience?: 'interested' | 'no_order' | null;
+  launchKey?: number;
+}) {
+  const { tenantId: authTenantId, session } = useAuth();
+  const tenantId = tenantOverride ?? authTenantId;
   const toast = useToast();
+  const requestHeaders = () => (tenantOverride ? { 'x-acting-tenant': tenantOverride } : actingHeaders());
   const waContacts = useMemo(() => contacts.filter((c) => c.platform === 'whatsapp' || !c.platform), [contacts]);
+  const noOrderIds = useMemo(
+    () => new Set(contactsWithoutOrders(contacts, orders).map((c) => c.id)),
+    [contacts, orders],
+  );
   const [tab, setTab] = useState<'campaigns' | 'templates'>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [name, setName] = useState('');
   const [templateName, setTemplateName] = useState('');
-  const [audience, setAudience] = useState<'all' | 'interested' | 'flagged'>('all');
+  const [audience, setAudience] = useState<'all' | 'interested' | 'flagged' | 'no_order'>('all');
   const [sending, setSending] = useState(false);
   const [tplName, setTplName] = useState('');
   const [tplCategory, setTplCategory] = useState('MARKETING');
@@ -73,17 +93,28 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
 
   const loadTemplates = useCallback(async () => {
     try {
-      const res = await supabase.functions.invoke('whatsapp-templates', { headers: actingHeaders(), method: 'GET' });
+      const res = await supabase.functions.invoke('whatsapp-templates', { headers: requestHeaders(), method: 'GET' });
       const list: Template[] = res.data?.data || [];
       setTemplates(list.filter((t) => !String(t.status || '').toUpperCase().includes('DELETED')));
     } catch {
       setTemplates([]);
     }
-  }, []);
+  }, [tenantOverride]);
 
   useEffect(() => {
-    Promise.all([loadCampaigns(), loadTemplates()]).finally(() => setLoading(false));
-  }, [loadCampaigns, loadTemplates]);
+    setLoadingCampaigns(true);
+    loadCampaigns().finally(() => setLoadingCampaigns(false));
+  }, [loadCampaigns]);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
+
+  useEffect(() => {
+    if (!launchAudience || !launchKey) return;
+    setAudience(launchAudience);
+    setShowCreate(true);
+  }, [launchAudience, launchKey]);
 
   const approved = templates.filter((t) => String(t.status).toUpperCase() === 'APPROVED');
   const selectedTemplate = approved.find((t) => t.name === templateName);
@@ -91,6 +122,7 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
     if (c.optedOut) return false;
     if (audience === 'interested') return !!c.isInterested;
     if (audience === 'flagged') return !!c.needsHuman;
+    if (audience === 'no_order') return noOrderIds.has(c.id);
     return true;
   });
 
@@ -103,7 +135,7 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
     try {
         const templateBody = selectedTemplate?.components?.find((c: any) => String(c.type).toUpperCase() === 'BODY')?.text || '';
       const res = await supabase.functions.invoke('send-campaign', {
-        headers: actingHeaders(),
+        headers: requestHeaders(),
         body: {
           name: name.trim(),
           templateName,
@@ -143,7 +175,7 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
     setCreatingTpl(true);
     try {
       const res = await supabase.functions.invoke('whatsapp-templates', {
-        headers: actingHeaders(),
+        headers: requestHeaders(),
         body: {
           name: templateSlug,
           category: tplCategory,
@@ -180,7 +212,7 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
       const qs = new URLSearchParams({ name: template.name, id: template.id });
       const resp = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-templates?${qs.toString()}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY, ...actingHeaders() },
+        headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY, ...requestHeaders() },
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data?.error) throw new Error(data?.error?.message || 'Failed to delete');
@@ -191,7 +223,23 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
     }
   };
 
-  if (loading) return <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />;
+  const deleteCampaign = (campaign: Campaign) => {
+    Alert.alert('Delete campaign', `Delete campaign "${campaign.name}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('campaigns').delete().eq('id', campaign.id);
+          if (error) toast.error(error.message);
+          else {
+            toast.success('Campaign deleted');
+            loadCampaigns();
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -226,7 +274,8 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
               }}
             />
           </View>
-          {campaigns.length === 0 ? (
+          {loadingCampaigns ? <ActivityIndicator color={colors.primary} /> : null}
+          {!loadingCampaigns && campaigns.length === 0 ? (
             <View style={styles.empty}>
               <Megaphone size={36} color={colors.mutedForeground} />
               <Text style={styles.emptyTitle}>No campaigns yet</Text>
@@ -235,7 +284,12 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
           ) : (
             campaigns.map((c) => (
               <View key={c.id} style={styles.card}>
-                <Text style={styles.name}>{c.name}</Text>
+                <View style={styles.row}>
+                  <Text style={[styles.name, { flex: 1 }]}>{c.name}</Text>
+                  <Pressable onPress={() => deleteCampaign(c)} hitSlop={8}>
+                    <Trash2 size={16} color={colors.destructive} />
+                  </Pressable>
+                </View>
                 <Text style={styles.sub}>{c.template_name}</Text>
                 <View style={styles.row}>
                   <Badge label={c.status} tone={c.status === 'completed' ? 'success' : 'primary'} />
@@ -294,6 +348,7 @@ export function CampaignsPanel({ contacts = [] }: { contacts?: Contact[] }) {
         <View style={styles.row}>
           <Button title={`All (${waContacts.length})`} variant={audience === 'all' ? 'primary' : 'outline'} onPress={() => setAudience('all')} />
           <Button title={`Interested (${waContacts.filter((c) => c.isInterested).length})`} variant={audience === 'interested' ? 'primary' : 'outline'} onPress={() => setAudience('interested')} />
+          <Button title={`No order (${noOrderIds.size})`} variant={audience === 'no_order' ? 'primary' : 'outline'} onPress={() => setAudience('no_order')} />
           <Button title={`Flagged (${waContacts.filter((c) => c.needsHuman).length})`} variant={audience === 'flagged' ? 'primary' : 'outline'} onPress={() => setAudience('flagged')} />
         </View>
         <Text style={styles.meta}>{recipients.length} recipients selected</Text>

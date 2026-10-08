@@ -35,6 +35,7 @@ import {
 import type { Contact, Message, MediaFile } from '../types';
 import { avatarColor, colors, initials, radius } from '../theme';
 import { MessageBubble } from './MessageBubble';
+import { VoiceRecorderButton } from './VoiceRecorderButton';
 import { Button } from './ui';
 import { useSafeHeaderPad } from './ScreenHeader';
 import { InstagramIcon } from './ChannelIcons';
@@ -107,15 +108,25 @@ export function ChatWindow({
   };
 
   const pickImage = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
-    if (res.canceled || !res.assets[0]) return;
-    const asset = res.assets[0];
-    onSendMessage(inputValue.trim(), {
-      uri: asset.uri,
-      type: asset.mimeType || 'image/jpeg',
-      name: asset.fileName || 'photo.jpg',
-    });
-    setInputValue('');
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Photos', 'Allow photo access to send a picture in this chat.');
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (res.canceled || !res.assets[0]) return;
+      const asset = res.assets[0];
+      const name = (asset.fileName || 'photo.jpg').replace(/\.(heic|heif|webp)$/i, '.jpg');
+      onSendMessage(inputValue.trim(), {
+        uri: asset.uri,
+        type: 'image/jpeg',
+        name,
+      });
+      setInputValue('');
+    } catch (e: any) {
+      Alert.alert('Photos', e?.message || 'Could not open your photos.');
+    }
   };
 
   const pickFile = async () => {
@@ -219,6 +230,14 @@ export function ChatWindow({
         <Pressable onPress={pickFile} style={styles.iconBtnLight}>
           <Paperclip size={20} color={colors.mutedForeground} />
         </Pressable>
+        <VoiceRecorderButton
+          disabled={replyWindowClosed}
+          onError={(message) => Alert.alert('Voice message', message)}
+          onRecorded={(file) => {
+            onSendMessage(inputValue.trim(), file);
+            setInputValue('');
+          }}
+        />
         <TextInput
           value={inputValue}
           onChangeText={setInputValue}

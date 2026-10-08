@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode, type RefObject } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -67,7 +67,15 @@ export function KeyboardSheet({
   );
 }
 
-export function KeyboardForm({ children, contentStyle }: { children: ReactNode; contentStyle?: ViewStyle }) {
+export function KeyboardForm({
+  children,
+  contentStyle,
+  scrollRef,
+}: {
+  children: ReactNode;
+  contentStyle?: ViewStyle;
+  scrollRef?: RefObject<ScrollView | null>;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
@@ -76,6 +84,7 @@ export function KeyboardForm({ children, contentStyle }: { children: ReactNode; 
       keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
     >
       <ScrollView
+        ref={scrollRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={[{ flexGrow: 1 }, contentStyle, { paddingBottom: Math.max(insets.bottom, 24) + 32 }]}

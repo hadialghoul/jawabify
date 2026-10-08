@@ -235,7 +235,7 @@ export function useMessages() {
         timestamp: new Date(),
         status: 'sending',
         direction: 'outgoing',
-        mediaUrl: mediaFile && mediaFile.type.startsWith('image/') ? mediaFile.uri : undefined,
+        mediaUrl: mediaFile?.uri,
         mediaType: mediaFile?.type || undefined,
       };
       setMessages((prev) => ({ ...prev, [contact.id]: [...(prev[contact.id] || []), tempMessage] }));
@@ -400,26 +400,42 @@ export function useMessages() {
     return true;
   }, []);
 
-  const updateContact = useCallback(async (contactId: string, updates: { name?: string; email?: string | null; address?: string | null; notes?: string | null; tags?: string[] } | string) => {
-    const payload: any = typeof updates === 'string' ? { name: updates } : { ...updates };
-    const { error } = await supabase.from('contacts').update(payload).eq('id', contactId);
-    if (error) return false;
-    setContacts((prev) =>
-      prev.map((c) =>
-        c.id === contactId
-          ? {
-              ...c,
-              ...(payload.name !== undefined ? { name: payload.name } : {}),
-              ...(payload.email !== undefined ? { email: payload.email || undefined } : {}),
-              ...(payload.address !== undefined ? { address: payload.address || undefined } : {}),
-              ...(payload.notes !== undefined ? { notes: payload.notes || undefined } : {}),
-              ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
-            }
-          : c,
-      ),
-    );
-    return true;
-  }, []);
+  const updateContact = useCallback(
+    async (
+      contactId: string,
+      updates:
+        | {
+            name?: string;
+            phone_number?: string;
+            email?: string | null;
+            address?: string | null;
+            notes?: string | null;
+            tags?: string[];
+          }
+        | string,
+    ) => {
+      const payload: any = typeof updates === 'string' ? { name: updates } : { ...updates };
+      const { error } = await supabase.from('contacts').update(payload).eq('id', contactId);
+      if (error) return false;
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.id === contactId
+            ? {
+                ...c,
+                ...(payload.name !== undefined ? { name: payload.name } : {}),
+                ...(payload.phone_number !== undefined ? { phoneNumber: payload.phone_number } : {}),
+                ...(payload.email !== undefined ? { email: payload.email || undefined } : {}),
+                ...(payload.address !== undefined ? { address: payload.address || undefined } : {}),
+                ...(payload.notes !== undefined ? { notes: payload.notes || undefined } : {}),
+                ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+              }
+            : c,
+        ),
+      );
+      return true;
+    },
+    [],
+  );
 
   const toggleInterested = useCallback(async (contactId: string, isInterested: boolean, reason?: string) => {
     const payload: any = {

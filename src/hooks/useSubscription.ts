@@ -12,6 +12,20 @@ export interface SubscriptionRecord {
   billing_provider?: 'stripe' | 'shopify' | string | null;
   shopify_subscription_id?: string | null;
   shop_domain?: string | null;
+  environment?: string | null;
+}
+
+
+const GROWTH_PRICE_IDS = new Set(['jawabify_growth_monthly']);
+
+export function isGrowthSubscription(sub: SubscriptionRecord | null | undefined): boolean {
+  if (!sub) return false;
+  const price = (sub.price_id || '').toLowerCase();
+  if (GROWTH_PRICE_IDS.has(price) || price.includes('growth')) return true;
+  // Shopify sometimes stores plan in shopify fields
+  const shop = String((sub as any).shopify_subscription_id || (sub as any).shop_domain || '');
+  void shop;
+  return false; // price_id is the source of truth
 }
 
 function isRecordActive(s: SubscriptionRecord): boolean {
@@ -53,5 +67,11 @@ export function useSubscription() {
     fetchSub();
   }, [user?.id, tenantId]);
 
-  return { subscription, loading, isActive: !!subscription && isRecordActive(subscription), refetch: fetchSub };
+  return {
+    subscription,
+    loading,
+    isActive: !!subscription && isRecordActive(subscription),
+    isGrowth: isGrowthSubscription(subscription),
+    refetch: fetchSub,
+  };
 }

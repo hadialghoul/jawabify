@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Alert, Image as RNImage, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Image as RNImage, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Bot,
+  Calendar,
   CheckCircle2,
   ImagePlus,
   Link as LinkIcon,
@@ -14,18 +15,32 @@ import {
   Trash2,
 } from 'lucide-react-native';
 import { InstagramIcon } from '../components/ChannelIcons';
+import { InstagramPagePicker } from '../components/InstagramPagePicker';
+import { useInstagramFacebookConnect } from '../hooks/useInstagramFacebookConnect';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import { actingHeaders } from '../lib/actingTenant';
-import { useInstagramConnection } from '../hooks/useAppData';
+import { useGoogleCalendarConnection, useInstagramConnection } from '../hooks/useAppData';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
-import { WEB_ORIGIN } from '../config';
+import { APP_ORIGIN, WEB_ORIGIN } from '../config';
+import { connectWhatsApp } from '../lib/whatsappConnect';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { KeyboardForm } from '../components/KeyboardSheet';
 import { BillingCard } from '../components/settings/BillingCard';
 import { TeamSection } from '../components/settings/TeamSection';
+import { ServiceBusinessSettings } from '../components/settings/ServiceBusinessSettings';
+import { EducationSettings } from '../components/settings/EducationSettings';
+import { HealthcareSettings } from '../components/settings/HealthcareSettings';
+import { RealEstateSettings } from '../components/settings/RealEstateSettings';
+import { RestaurantBusinessSettings } from '../components/settings/RestaurantBusinessSettings';
+import { KnowledgeImportCard } from '../components/settings/KnowledgeImportCard';
+import { MenuFileImportCard } from '../components/settings/MenuFileImportCard';
+import { OnlinePaymentsCard } from '../components/settings/OnlinePaymentsCard';
+import { QuickAnswersCard } from '../components/settings/QuickAnswersCard';
+import { useTenantVertical } from '../hooks/useAppData';
+import { verticalMeta } from '../lib/verticals';
 
 const KNOWLEDGE_ENTRY_TITLE = 'main_knowledge';
 const LEARNED_KNOWLEDGE_TITLE = 'learned_from_conversations';
@@ -46,10 +61,29 @@ interface KnowledgeImage {
   is_active: boolean;
 }
 
-export function SettingsScreen({ onBack }: { onBack: () => void }) {
-  const { user, tenantId, isTenantAdmin, signOut } = useAuth();
+export function SettingsScreen({
+  onBack,
+  focusSection = null,
+}: {
+  onBack: () => void;
+  focusSection?: 'billing' | null;
+}) {
+  const { user, tenantId, isTenantAdmin, isSuperAdmin, actingTenantId, signOut } = useAuth();
+  const { vertical } = useTenantVertical();
+  const scrollRef = useRef<ScrollView>(null);
+  const billingY = useRef(0);
+
+  useEffect(() => {
+    if (focusSection !== 'billing') return;
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, billingY.current - 8), animated: true });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [focusSection]);
   const toast = useToast();
   const instagram = useInstagramConnection();
+  const igConnect = useInstagramFacebookConnect(() => instagram.refresh());
+  const googleCalendar = useGoogleCalendarConnection();
   const [content, setContent] = useState('');
   const [entryId, setEntryId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,8 +200,10 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScreenHeader title="Settings" onBack={onBack} />
-      <KeyboardForm contentStyle={styles.pad}>
-          <BillingCard />
+      <KeyboardForm contentStyle={styles.pad} scrollRef={scrollRef}>
+          <View onLayout={(e) => { billingY.current = e.nativeEvent.layout.y; }}>
+            <BillingCard highlight={focusSection === 'billing'} />
+          </View>
 
           {isTenantAdmin ? <TeamSection /> : <Text style={styles.sub}>Only owners and admins can manage the team.</Text>}
 
@@ -236,7 +272,38 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
                 <Text style={styles.sub}>{waConnected ? waPhone : 'Connect once to refresh Meta account access.'}</Text>
               </View>
             </View>
-            <Button title="Connect / reconnect WhatsApp" onPress={() => WebBrowser.openBrowserAsync(`${WEB_ORIGIN}/onboarding`)} />
+            <Button
+              title="Connect / reconnect WhatsApp"
+              onPress={async () => {
+                if (!tenantId) {
+                  toast.error('No workspace found');
+                  return;
+                }
+                try {
+                  const result = await connectWhatsApp(tenantId);
+                  // Refresh local WhatsApp status from DB
+                  const { data: wa } = await supabase
+                    .from('tenant_credentials')
+                    .select('phone_number, phone_number_id, waba_id, is_active')
+                    .eq('tenant_id', tenantId)
+                    .eq('provider', 'whatsapp_cloud')
+                    .maybeSingle();
+                  const connected = Boolean(wa?.is_active && (wa.phone_number_id || wa.waba_id));
+                  setWaConnected(connected);
+                  setWaPhone(wa?.phone_number || wa?.phone_number_id || 'WhatsApp connected');
+                  if (result.warning) toast.error(result.warning);
+                  else if (result.ok || connected) {
+                    toast.success(
+                      result.phone ? `WhatsApp connected (${result.phone})` : 'WhatsApp connected',
+                    );
+                  } else {
+                    toast.error('WhatsApp connection did not finish');
+                  }
+                } catch (e: any) {
+                  toast.error(e?.message || 'Could not connect WhatsApp');
+                }
+              }}
+            />
             {waConnected && isTenantAdmin ? (
               <Button
                 title="Disconnect from Meta"
@@ -264,6 +331,7 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
             ) : null}
           </Card>
 
+          {vertical === 'ecommerce' ? (
           <Card>
             <View style={styles.head}>
               <Store size={16} color={colors.primary} />
@@ -376,6 +444,7 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
               </>
             )}
           </Card>
+          ) : null}
 
           <Card>
             <View style={styles.head}>
@@ -392,31 +461,27 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
                     ? instagram.username
                       ? `@${instagram.username}`
                       : 'Instagram professional account linked'
-                    : 'Requires an Instagram professional account linked to your Facebook Page.'}
+                    : 'Sign in with Facebook and pick the Page linked to your Instagram professional account.'}
                 </Text>
               </View>
             </View>
             <Button
-              title={instagram.connected ? 'Manage Instagram' : 'Connect Instagram'}
+              title={instagram.connected ? 'Refresh status' : 'Connect with Facebook'}
+              disabled={igConnect.connecting}
               onPress={async () => {
                 if (instagram.connected) {
-                  await WebBrowser.openBrowserAsync(`${WEB_ORIGIN}/integrations`);
-                  instagram.refresh();
+                  await instagram.refresh();
+                  toast.success('Instagram status updated');
                   return;
                 }
-                try {
-                  const { data, error } = await supabase.functions.invoke('instagram-connect', {
-                    body: { action: 'start', redirectTo: `${WEB_ORIGIN}/integrations` },
-                  });
-                  if (error) throw error;
-                  const url = data?.url || data?.authUrl;
-                  if (url) await WebBrowser.openBrowserAsync(url);
-                  else await WebBrowser.openBrowserAsync(`${WEB_ORIGIN}/integrations`);
-                  instagram.refresh();
-                } catch (e: any) {
-                  toast.error(e?.message || 'Could not start Instagram connect');
-                }
+                await igConnect.connect();
               }}
+            />
+            <InstagramPagePicker
+              visible={igConnect.pickerVisible}
+              pages={igConnect.pages ?? []}
+              onSelect={igConnect.selectPage}
+              onCancel={igConnect.clearPicker}
             />
             {instagram.connected && isTenantAdmin ? (
               <Button
@@ -446,37 +511,125 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
 
           <Card>
             <View style={styles.head}>
-              <Sparkles size={16} color={colors.primary} />
-              <Text style={styles.h2}>AI training</Text>
+              <Calendar size={16} color={colors.primary} />
+              <Text style={styles.h2}>Google Calendar</Text>
             </View>
-            <Text style={styles.sub}>This is what your assistant knows about your business.</Text>
-            <Input value={urlInput} onChangeText={setUrlInput} placeholder="https://your-website.com" autoCapitalize="none" />
+            <Text style={styles.sub}>Push confirmed bookings to your Google Calendar.</Text>
+            <View style={styles.switchRow}>
+              <CheckCircle2 size={22} color={googleCalendar.connected ? colors.success : colors.mutedForeground} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>{googleCalendar.connected ? 'Connected' : 'Not connected'}</Text>
+                <Text style={styles.sub}>
+                  {googleCalendar.connected ? googleCalendar.email || 'Google account linked' : 'Connect the owner’s Google account.'}
+                </Text>
+              </View>
+            </View>
             <Button
-              title={fetchingUrl ? 'Fetching…' : 'Add content from URL'}
-              variant="outline"
-              loading={fetchingUrl}
-              icon={<LinkIcon size={14} color={colors.foreground} />}
+              title={googleCalendar.connected ? 'Manage Google Calendar' : 'Connect Google Calendar'}
               onPress={async () => {
-                if (!urlInput.trim()) {
-                  toast.error('Please enter a URL');
+                if (googleCalendar.connected) {
+                  await WebBrowser.openBrowserAsync(`${APP_ORIGIN}/integrations`);
+                  googleCalendar.refresh();
                   return;
                 }
-                setFetchingUrl(true);
                 try {
-                  const { data, error } = await supabase.functions.invoke('fetch-url-content', { body: { url: urlInput.trim() } });
-                  if (error) throw error;
-                  if (data.success) {
-                    const separator = content.trim() ? '\n\n---\n\n' : '';
-                    setContent(`${content}${separator}## Content from ${data.url}\n\n${data.content}`);
-                    setUrlInput('');
-                    toast.success('Content fetched and added');
-                  } else toast.error(data.error || 'Failed to fetch URL');
-                } catch {
-                  toast.error('Failed to fetch content from URL');
+                  const { data, error } = await supabase.functions.invoke('google-calendar-oauth-start', {
+                    body: { origin: 'https://app.jawabify.com' },
+                  });
+                  const message = data?.error || error?.message;
+                  if (error || !data?.authorizationUrl) throw new Error(message || 'Could not start Google sign-in.');
+                  await WebBrowser.openBrowserAsync(data.authorizationUrl);
+                  await googleCalendar.refresh();
+                  toast.success('If you finished Google sign-in, your calendar is connected.');
+                } catch (e: any) {
+                  toast.error(e?.message || 'Could not start the Google connection');
                 }
-                setFetchingUrl(false);
               }}
             />
+            {googleCalendar.connected && isTenantAdmin ? (
+              <Button
+                title="Disconnect Google Calendar"
+                variant="destructive"
+                onPress={() =>
+                  Alert.alert('Disconnect Google Calendar?', 'Bookings will stop syncing until you reconnect.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Disconnect',
+                      style: 'destructive',
+                      onPress: async () => {
+                        const { error } = await supabase.functions.invoke('google-calendar-status', {
+                          body: { action: 'disconnect' },
+                        });
+                        if (error) toast.error('Failed to disconnect Google Calendar');
+                        else {
+                          await googleCalendar.refresh();
+                          toast.success('Google Calendar disconnected');
+                        }
+                      },
+                    },
+                  ])
+                }
+              />
+            ) : null}
+          </Card>
+
+          {(vertical === 'service' || vertical === 'restaurant') ? (
+            <>
+              <OnlinePaymentsCard />
+              <QuickAnswersCard />
+            </>
+          ) : null}
+
+          {vertical === 'service' || vertical === 'wellness' ? <ServiceBusinessSettings /> : null}
+          {vertical === 'restaurant' ? <RestaurantBusinessSettings /> : null}
+          {vertical === 'education' ? <EducationSettings /> : null}
+          {vertical === 'healthcare' ? <HealthcareSettings /> : null}
+          {vertical === 'real_estate' ? <RealEstateSettings /> : null}
+
+          {vertical === 'restaurant' ? <MenuFileImportCard /> : null}
+          {vertical !== 'restaurant' ? (
+            <KnowledgeImportCard variant={vertical === 'service' ? 'service' : 'default'} />
+          ) : null}
+
+          <Card>
+            <View style={styles.head}>
+              <Sparkles size={16} color={colors.primary} />
+              <Text style={styles.h2}>
+                Knowledge base{vertical === 'restaurant' ? ` · ${verticalMeta('restaurant').emoji}` : ''}
+              </Text>
+            </View>
+            <Text style={styles.sub}>This is what your assistant knows about your business.</Text>
+            {vertical !== 'service' && vertical !== 'restaurant' ? (
+              <>
+                <Input value={urlInput} onChangeText={setUrlInput} placeholder="https://your-website.com" autoCapitalize="none" />
+                <Button
+                  title={fetchingUrl ? 'Fetching…' : 'Add content from URL'}
+                  variant="outline"
+                  loading={fetchingUrl}
+                  icon={<LinkIcon size={14} color={colors.foreground} />}
+                  onPress={async () => {
+                    if (!urlInput.trim()) {
+                      toast.error('Please enter a URL');
+                      return;
+                    }
+                    setFetchingUrl(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke('fetch-url-content', { body: { url: urlInput.trim() } });
+                      if (error) throw error;
+                      if (data.success) {
+                        const separator = content.trim() ? '\n\n---\n\n' : '';
+                        setContent(`${content}${separator}## Content from ${data.url}\n\n${data.content}`);
+                        setUrlInput('');
+                        toast.success('Content fetched and added');
+                      } else toast.error(data.error || 'Failed to fetch URL');
+                    } catch {
+                      toast.error('Failed to fetch content from URL');
+                    }
+                    setFetchingUrl(false);
+                  }}
+                />
+              </>
+            ) : null}
             <Input value={content} onChangeText={setContent} placeholder="Products, prices, policies, FAQs…" multiline style={{ minHeight: 180, textAlignVertical: 'top' }} />
             <Button title={saving ? 'Saving…' : 'Save knowledge'} loading={saving || loading} onPress={saveKnowledge} />
           </Card>

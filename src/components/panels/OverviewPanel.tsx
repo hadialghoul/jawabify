@@ -43,7 +43,14 @@ function Stat({ label, value, icon, sub }: { label: string; value: number | stri
   );
 }
 
-export function OverviewPanel({ onSelectByPhone }: { onSelectByPhone?: (phone: string) => void }) {
+export function OverviewPanel({
+  onSelectByPhone,
+  topItemsLabel = 'Top products',
+}: {
+  onSelectByPhone?: (phone: string) => void;
+  topItemsLabel?: string;
+}) {
+  const topItemsIsService = /service/i.test(topItemsLabel);
   const [range, setRange] = useState<AnalyticsRange>(() => PRESETS[2].get());
   const { data: today, loading: todayLoading, refetch: refetchToday } = useTodayStats();
   const { data, loading, refetch } = useAnalytics(range);
@@ -170,9 +177,12 @@ export function OverviewPanel({ onSelectByPhone }: { onSelectByPhone?: (phone: s
         <BarChartView data={hourly} xKey="hour" yKey="count" formatX={(h) => `${h}h`} />
       </ChartCard>
 
-      <ChartCard title="Top products" subtitle="By order count">
+      <ChartCard
+        title={topItemsLabel}
+        subtitle={topItemsIsService ? 'By booking count' : 'By order count'}
+      >
         {(data?.topProducts?.length ?? 0) === 0 ? (
-          <Text style={styles.empty}>No orders yet</Text>
+          <Text style={styles.empty}>{topItemsIsService ? 'No data yet' : 'No orders yet'}</Text>
         ) : (
           <HorizontalBarChart data={data!.topProducts} labelKey="name" valueKey="orders" />
         )}

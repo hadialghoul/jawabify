@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './useAuth';
 import type { Vertical } from '../lib/verticals';
@@ -12,17 +13,28 @@ export function useTenantVertical() {
   const [vertical, setVertical] = useState<Vertical>('ecommerce');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchVertical = useCallback(async () => {
     if (!tenantId) {
       setLoading(false);
       return;
     }
-    (async () => {
-      const { data } = await supabase.from('tenants').select('vertical').eq('id', tenantId).maybeSingle();
-      if (data?.vertical) setVertical(data.vertical as Vertical);
-      setLoading(false);
-    })();
+    const { data } = await supabase.from('tenants').select('vertical').eq('id', tenantId).maybeSingle();
+    if (data?.vertical) setVertical(data.vertical as Vertical);
+    setLoading(false);
   }, [tenantId]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchVertical();
+  }, [fetchVertical]);
+
+  // Re-read on resume so a vertical switch on the server shows up without a permanent cache.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') fetchVertical();
+    });
+    return () => sub.remove();
+  }, [fetchVertical]);
 
   return { vertical, loading };
 }
@@ -118,6 +130,35 @@ export function useInstagramConnection() {
       username: (data as any)?.ig_username || undefined,
     });
   }, [tenantId]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { ...connection, refresh };
+}
+
+export interface GoogleCalendarConnection {
+  connected: boolean;
+  email?: string;
+}
+
+export function useGoogleCalendarConnection() {
+  const [connection, setConnection] = useState<GoogleCalendarConnection>({ connected: false });
+
+  const refresh = useCallback(async () => {
+    const { data, error } = await supabase.functions.invoke('google-calendar-status', {
+      body: { action: 'status' },
+    });
+    if (error || !data) {
+      setConnection({ connected: false });
+      return;
+    }
+    setConnection({
+      connected: !!data.connected,
+      email: data.email || undefined,
+    });
+  }, []);
 
   useEffect(() => {
     refresh();

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import { VERTICALS, type Vertical } from '../lib/verticals';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
-import { WEB_ORIGIN } from '../config';
+import { connectWhatsApp } from '../lib/whatsappConnect';
 import { KeyboardScreen } from '../components/KeyboardSheet';
 
 export function OnboardingScreen() {
@@ -146,15 +145,25 @@ export function OnboardingScreen() {
           <>
             <Text style={styles.title}>Connect WhatsApp</Text>
             <Text style={styles.muted}>
-              WhatsApp Business signup uses Facebook. You can connect now in the browser, or skip and do it later from Settings.
+              WhatsApp Business signup uses Facebook. You stay signed in to Jawabify in the app — only Facebook opens.
             </Text>
             <Button
               title="Connect WhatsApp"
               onPress={async () => {
-                await ensureTenant();
+                const tId = await ensureTenant();
                 await refreshContext();
-                await WebBrowser.openBrowserAsync(`${WEB_ORIGIN}/onboarding`);
-                await refreshContext();
+                if (!tId) {
+                  toast.error('Could not set up your workspace');
+                  return;
+                }
+                try {
+                  const result = await connectWhatsApp(tId);
+                  await refreshContext();
+                  if (result.warning) toast.error(result.warning);
+                  else toast.success(result.phone ? `WhatsApp connected (${result.phone})` : 'WhatsApp connected');
+                } catch (e: any) {
+                  toast.error(e?.message || 'Could not connect WhatsApp');
+                }
               }}
             />
             <Button

@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
-import { ArrowLeft, BookOpen, Bot, MessageSquare, Save, Send, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, BookOpen, Bot, Languages, MessageSquare, Save, Send, Trash2 } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../hooks/useToast';
@@ -47,17 +47,62 @@ function contactSubtitle(c: ContactRow) {
 }
 
 
+type AiLanguage = 'all' | 'english' | 'arabizi' | 'arabic' | 'french';
+
+const AI_LANGUAGE_OPTIONS: { value: AiLanguage; label: string; hint: string }[] = [
+  { value: 'all', label: 'All languages', hint: 'AI replies in whatever language the customer writes in.' },
+  { value: 'english', label: 'English only', hint: 'AI always replies in English.' },
+  { value: 'arabizi', label: 'Arabizi only', hint: 'AI always replies in Lebanese Arabizi (Latin letters).' },
+  { value: 'arabic', label: 'Arabic only', hint: 'AI always replies in Arabic script.' },
+  { value: 'french', label: 'French only', hint: 'AI always replies in French.' },
+];
+
 function AdminAiControls({ tenantId }: { tenantId: string }) {
   const toast = useToast();
   const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [language, setLanguage] = useState<AiLanguage>('all');
+  const [savingLang, setSavingLang] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from('tenants').select('ai_replies_enabled').eq('id', tenantId).maybeSingle();
       if (data) setEnabled(data.ai_replies_enabled !== false);
+      const { data: langRow } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('tenant_id', tenantId)
+        .eq('key', 'ai_reply_language')
+        .maybeSingle();
+      if (langRow?.value) {
+        const raw = langRow.value as unknown;
+        const v = typeof raw === 'string' ? raw.replace(/^"|"$/g, '') : String(raw);
+        if (AI_LANGUAGE_OPTIONS.some((o) => o.value === v)) setLanguage(v as AiLanguage);
+      }
     })();
   }, [tenantId]);
+
+  const saveLanguage = async (lang: AiLanguage) => {
+    const prev = language;
+    setLanguage(lang);
+    setSavingLang(true);
+    const { data: existing } = await supabase
+      .from('app_settings')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('key', 'ai_reply_language')
+      .maybeSingle();
+    const { error } = existing
+      ? await supabase.from('app_settings').update({ value: lang }).eq('id', existing.id)
+      : await supabase.from('app_settings').insert({ tenant_id: tenantId, key: 'ai_reply_language', value: lang } as any);
+    setSavingLang(false);
+    if (error) {
+      setLanguage(prev);
+      toast.error(error.message);
+      return;
+    }
+    toast.success('AI reply language updated');
+  };
 
   const save = async (v: boolean) => {
     setEnabled(v);
@@ -79,6 +124,23 @@ function AdminAiControls({ tenantId }: { tenantId: string }) {
         <Text style={styles.name}>{enabled ? 'Enabled' : 'Disabled'}</Text>
         <Switch value={enabled} disabled={saving} onValueChange={save} />
       </View>
+      <View style={[styles.blockHead, { marginTop: 12 }]}>
+        <Languages size={16} color={colors.primary} />
+        <Text style={styles.h1}>AI reply language</Text>
+      </View>
+      <View style={styles.langRow}>
+        {AI_LANGUAGE_OPTIONS.map((o) => (
+          <Pressable
+            key={o.value}
+            disabled={savingLang}
+            onPress={() => saveLanguage(o.value)}
+            style={[styles.langChip, language === o.value && styles.langChipOn]}
+          >
+            <Text style={[styles.langChipText, language === o.value && { color: '#fff' }]}>{o.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.meta}>{AI_LANGUAGE_OPTIONS.find((o) => o.value === language)?.hint}</Text>
     </View>
   );
 }
@@ -398,25 +460,31 @@ export function SuperAdminInbox() {
 
   return (
     <View style={{ flex: 1 }}>
-      <AdminAiControls tenantId={tenantId} />
-      <AdminKnowledge tenantId={tenantId} />
-      <Text style={styles.h1}>Admin inbox</Text>
-      <Text style={styles.meta}>WhatsApp messages to the Jawabify support number — same as the website.</Text>
-      <Input placeholder="Search conversations…" value={search} onChangeText={setSearch} style={{ marginVertical: 10 }} />
-      {loadingContacts ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-      ) : (
-        <FlatList
-          data={visible}
-          keyExtractor={(c) => c.id}
-          contentContainerStyle={{ paddingBottom: 40 }}
-          ListEmptyComponent={
+      <FlatList
+        style={{ flex: 1 }}
+        data={visible}
+        keyExtractor={(c) => c.id}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        ListHeaderComponent={
+          <View>
+            <AdminAiControls tenantId={tenantId} />
+            <AdminKnowledge tenantId={tenantId} />
+            <Text style={styles.h1}>Inbox</Text>
+            <Text style={styles.meta}>WhatsApp messages to the Jawabify support number — same as the website.</Text>
+            <Input placeholder="Search conversations…" value={search} onChangeText={setSearch} style={{ marginVertical: 10 }} />
+            <Button title="Refresh" variant="outline" onPress={loadContacts} style={{ marginBottom: 8 }} />
+            {loadingContacts ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} /> : null}
+          </View>
+        }
+        ListEmptyComponent={
+          loadingContacts ? null : (
             <View style={styles.center}>
               <MessageSquare size={36} color={colors.mutedForeground} />
               <Text style={styles.emptyText}>No conversations yet.</Text>
             </View>
-          }
-          renderItem={({ item }) => {
+          )
+        }
+        renderItem={({ item }) => {
             const palette = avatarColor(item.id || item.name || item.phone_number);
             const time = item.updated_at
               ? (() => {
@@ -449,9 +517,7 @@ export function SuperAdminInbox() {
               </Pressable>
             );
           }}
-        />
-      )}
-      <Button title="Refresh" variant="outline" onPress={loadContacts} style={{ marginTop: 8 }} />
+      />
     </View>
   );
 }
@@ -501,6 +567,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.card,
   },
+  langRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  langChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.card },
+  langChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  langChipText: { fontSize: 12, fontWeight: '700', color: colors.foreground },
   sendBtn: {
     width: 44,
     height: 44,

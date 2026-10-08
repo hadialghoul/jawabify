@@ -171,15 +171,19 @@ export function SuperAdminAlertsPanel() {
             <Text style={styles.meta}>
               {e.template_name} · {format(new Date(e.created_at), 'MMM d, HH:mm')}
             </Text>
+            {e.error_message ? <Text style={styles.danger}>{e.error_message}</Text> : null}
           </View>
         ))}
       </Section>
 
-      <Section title="Suppressed emails" empty="No suppressed emails." count={data.suppressed?.length ?? 0}>
+      <Section title="Suppressed emails" empty="No suppressions." count={data.suppressed?.length ?? 0}>
         {(data.suppressed || []).map((e, idx) => (
           <View key={e.id || idx} style={styles.card}>
-            <Text style={styles.body}>{e.email || e.recipient_email || '—'}</Text>
-            <Text style={styles.meta}>{e.reason || e.status || 'suppressed'}</Text>
+            <View style={styles.row}>
+              <Badge label={e.reason || 'suppressed'} tone="muted" />
+              <Text style={styles.body}>{e.email || '—'}</Text>
+            </View>
+            <Text style={styles.meta}>{e.created_at ? format(new Date(e.created_at), 'MMM d, HH:mm') : ''}</Text>
           </View>
         ))}
       </Section>
@@ -188,11 +192,13 @@ export function SuperAdminAlertsPanel() {
         {(data.stuckSessions || []).map((s) => (
           <View key={s.id} style={styles.card}>
             <View style={styles.row}>
-              <Badge label={s.status || 'stuck'} tone="danger" />
+              <Badge label={s.state || 'stuck'} tone="muted" />
+              {s.flow_kind ? <Badge label={s.flow_kind} tone="primary" /> : null}
               <Text style={styles.body}>{tName(s.tenant_id)}</Text>
             </View>
             <Text style={styles.meta}>
-              {s.flow_key || s.session_type || 'session'} · {s.updated_at ? format(new Date(s.updated_at), 'MMM d, HH:mm') : '—'}
+              Expired {s.expires_at ? format(new Date(s.expires_at), 'MMM d, HH:mm') : '—'} · updated{' '}
+              {s.updated_at ? format(new Date(s.updated_at), 'MMM d, HH:mm') : '—'}
             </Text>
           </View>
         ))}

@@ -12,6 +12,12 @@ import { colors } from '../theme';
 export function RootNavigator() {
   const { user, tenantId, isSuperAdmin, isActingAs, loading } = useAuth();
   const [page, setPage] = useState<'app' | 'settings' | 'account'>('app');
+  const [settingsFocus, setSettingsFocus] = useState<'billing' | null>(null);
+
+  const openSettings = (focus?: 'billing') => {
+    setSettingsFocus(focus ?? null);
+    setPage('settings');
+  };
 
   if (loading) {
     return (
@@ -24,12 +30,22 @@ export function RootNavigator() {
 
   if (!user) return <AuthScreen />;
 
-  if (page === 'settings') return <SettingsScreen onBack={() => setPage('app')} />;
+  if (page === 'settings') {
+    return (
+      <SettingsScreen
+        onBack={() => {
+          setSettingsFocus(null);
+          setPage('app');
+        }}
+        focusSection={settingsFocus}
+      />
+    );
+  }
   if (page === 'account') return <AccountScreen onBack={() => setPage('app')} />;
 
   if (isSuperAdmin && !isActingAs) {
     return (
-      <SuperAdminScreen onOpenSettings={() => setPage('settings')} onOpenAccount={() => setPage('account')} />
+      <SuperAdminScreen onOpenSettings={() => openSettings()} onOpenAccount={() => setPage('account')} />
     );
   }
 
@@ -38,7 +54,8 @@ export function RootNavigator() {
   return (
     <MainScreen
       key={tenantId ?? 'main'}
-      onOpenSettings={() => setPage('settings')}
+      onOpenSettings={() => openSettings()}
+      onOpenBilling={() => openSettings('billing')}
       onOpenAccount={() => setPage('account')}
     />
   );

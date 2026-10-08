@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GraduationCap, Settings, UserRound } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,24 +17,34 @@ import {
   useTenantVertical,
 } from '../hooks/useAppData';
 import { ConversationList } from '../components/ConversationList';
+import { InstagramPagePicker } from '../components/InstagramPagePicker';
+import { useInstagramFacebookConnect } from '../hooks/useInstagramFacebookConnect';
 import { ChatWindow } from '../components/ChatWindow';
 import { BottomNav } from '../components/BottomNav';
 import { OverviewPanel } from '../components/panels/OverviewPanel';
 import { OrdersPanel } from '../components/panels/OrdersPanel';
-import { CrmPanel, FlaggedPanel, InterestedPanel } from '../components/panels/ListsPanel';
+import { CrmPanel, FlaggedPanel, InterestedPanel, NoOrderPanel } from '../components/panels/ListsPanel';
+import { contactsWithoutOrders } from '../lib/contactsWithoutOrders';
 import { AIIssuesPanel, VerticalRecordsPanel } from '../components/panels/MorePanels';
 import { WellnessPanel } from '../components/panels/WellnessPanel';
 import { RestaurantMenuPanel } from '../components/panels/RestaurantMenuPanel';
+import { RestaurantTablesPanel } from '../components/panels/RestaurantTablesPanel';
+import { ReservationsPanel } from '../components/panels/ReservationsPanel';
 import { CampaignsPanel } from '../components/panels/CampaignsPanel';
+import { GrowthUpgradePanel } from '../components/GrowthUpgradePanel';
+import { EducationPanel } from '../components/panels/EducationPanel';
+import { useSubscription } from '../hooks/useSubscription';
 import { Button, Input } from '../components/ui';
 import { colors } from '../theme';
-import { WEB_ORIGIN } from '../config';
+import { WEB_ORIGIN, APP_ORIGIN } from '../config';
 
 export function MainScreen({
   onOpenSettings,
+  onOpenBilling,
   onOpenAccount,
 }: {
   onOpenSettings: () => void;
+  onOpenBilling?: () => void;
   onOpenAccount: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -61,18 +71,33 @@ export function MainScreen({
     searchContacts,
     clearChatMessages,
     toggleBlocked,
+    updateContact,
   } = useMessages();
   const { orders, createOrder, updateOrderStatus, deleteOrder } = useOrders();
-  const { vertical: rawVertical } = useTenantVertical();
-  const vertical = rawVertical === 'service' ? 'wellness' : rawVertical;
+  const { vertical } = useTenantVertical();
+  const isService = vertical === 'service';
+  const isRestaurant = vertical === 'restaurant';
+  const { isGrowth } = useSubscription();
+  // CRM + Campaigns stay behind Growth for service and restaurant, same as the website.
+  const needsGrowthForCrm = (isService || isRestaurant) && !isGrowth;
   const { channel, setChannel } = useChannelFilter();
-  const { connected: instagramConnected } = useInstagramConnection();
+
+  // When vertical flips (e.g. Service → Restaurant), leave any stale service tab.
+  useEffect(() => {
+    const serviceOnly = new Set(['services', 'sessions', 'packages', 'staff', 'catalog']);
+    if (isRestaurant && serviceOnly.has(subTab)) setSubTab('home');
+  }, [isRestaurant, subTab]);
+  const { connected: instagramConnected, refresh: refreshInstagram } = useInstagramConnection();
+  const igConnect = useInstagramFacebookConnect(refreshInstagram);
   const { flagged, setLocalResolved, refetch: refetchFlagged } = useFlaggedContacts();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [activeTab, setActiveTab] = useState<'chats' | 'dashboard'>('chats');
   const [subTab, setSubTab] = useState('home');
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const [campaignLaunch, setCampaignLaunch] = useState<{ audience: 'interested' | 'no_order'; key: number } | null>(
+    null,
+  );
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [orderForm, setOrderForm] = useState({
@@ -91,7 +116,10 @@ export function MainScreen({
 
   const pendingOrdersCount = useMemo(() => orders.filter((o) => o.status === 'pending').length, [orders]);
   const interestedCount = useMemo(() => contacts.filter((c) => c.isInterested).length, [contacts]);
+  const noOrderCount = useMemo(() => contactsWithoutOrders(contacts, orders).length, [contacts, orders]);
   const unresolvedFlagged = useMemo(() => flagged.filter((c) => c.needsHuman), [flagged]);
+  const isEcommerce = vertical === 'ecommerce';
+  const showNoOrder = vertical === 'ecommerce' || vertical === 'restaurant';
   const railActive = activeTab === 'chats' ? 'chats' : subTab;
 
   const handleRailSelect = (key: string) => {
@@ -166,7 +194,7 @@ export function MainScreen({
             channel={channel}
             onChannelChange={setChannel}
             instagramConnected={instagramConnected}
-            onConnectInstagram={() => WebBrowser.openBrowserAsync(`${WEB_ORIGIN}/integrations`)}
+            onConnectInstagram={() => igConnect.connect()}
             emptyLoading={loading}
           />
         ) : null}
@@ -197,16 +225,20 @@ export function MainScreen({
             }}
             onClearChat={clearChatMessages}
             onToggleBlocked={toggleBlocked}
-            onCreateOrder={() => {
-              setOrderForm({
-                customerName: selectedContact.name,
-                customerPhone: selectedContact.phoneNumber,
-                customerAddress: selectedContact.address || '',
-                productName: '',
-                quantity: '1',
-              });
-              setShowNewOrder(true);
-            }}
+            onCreateOrder={
+              vertical === 'ecommerce' || vertical === 'restaurant'
+                ? () => {
+                    setOrderForm({
+                      customerName: selectedContact.name,
+                      customerPhone: selectedContact.phoneNumber,
+                      customerAddress: selectedContact.address || '',
+                      productName: '',
+                      quantity: '1',
+                    });
+                    setShowNewOrder(true);
+                  }
+                : undefined
+            }
           />
         ) : null}
 
@@ -214,6 +246,7 @@ export function MainScreen({
           <View style={{ flex: 1 }}>
             {subTab === 'home' ? (
               <OverviewPanel
+                topItemsLabel={isService ? 'Top services' : 'Top products'}
                 onSelectByPhone={(phone) => {
                   const c = contacts.find((x) => x.phoneNumber === phone);
                   if (c) handleSelectContact(c);
@@ -223,7 +256,42 @@ export function MainScreen({
             {subTab === 'orders' ? (
               <OrdersPanel orders={orders} onUpdateStatus={updateOrderStatus} onDeleteOrder={deleteOrder} onCreateOrder={createOrder} />
             ) : null}
-            {subTab === 'crm' ? <CrmPanel contacts={contacts} orders={orders} onSelectContact={handleSelectContact} /> : null}
+            {subTab === 'crm' ? (
+              needsGrowthForCrm ? (
+                <GrowthUpgradePanel feature="CRM" onUpgrade={onOpenBilling ?? onOpenSettings} />
+              ) : (
+                <CrmPanel
+                  contacts={contacts}
+                  orders={orders}
+                  onSelectContact={handleSelectContact}
+                  editable={isEcommerce || isRestaurant}
+                  onSaveContact={async (contactId, edits) => {
+                    const ok = await updateContact(contactId, {
+                      name: edits.name,
+                      phone_number: edits.phoneNumber,
+                      email: edits.email,
+                      address: edits.address,
+                      notes: edits.notes,
+                      tags: edits.tags,
+                    });
+                    if (ok) toast.success('Client updated');
+                    else toast.error('Could not save client');
+                    return ok;
+                  }}
+                />
+              )
+            ) : null}
+            {subTab === 'no_order' && showNoOrder ? (
+              <NoOrderPanel
+                contacts={contacts}
+                orders={orders}
+                onSelectContact={handleSelectContact}
+                onCampaign={() => {
+                  setCampaignLaunch({ audience: 'no_order', key: Date.now() });
+                  setSubTab('campaigns');
+                }}
+              />
+            ) : null}
             {subTab === 'interested' ? (
               <InterestedPanel
                 contacts={contacts}
@@ -253,7 +321,18 @@ export function MainScreen({
                 }}
               />
             ) : null}
-            {subTab === 'campaigns' ? <CampaignsPanel contacts={contacts} /> : null}
+            {subTab === 'campaigns' ? (
+              needsGrowthForCrm ? (
+                <GrowthUpgradePanel feature="Campaigns" onUpgrade={onOpenBilling ?? onOpenSettings} />
+              ) : (
+                <CampaignsPanel
+                  contacts={contacts}
+                  orders={orders}
+                  launchAudience={campaignLaunch?.audience ?? null}
+                  launchKey={campaignLaunch?.key}
+                />
+              )
+            ) : null}
             {subTab === 'ai_issues' ? (
               <AIIssuesPanel
                 onSelectByPhone={(phone) => {
@@ -262,14 +341,18 @@ export function MainScreen({
                 }}
               />
             ) : null}
-            {subTab === 'reservations' ? <VerticalRecordsPanel table="reservations" title="Reservations" fields={['guest_name', 'starts_at', 'party_size', 'status']} /> : null}
+            {subTab === 'reservations' ? <ReservationsPanel /> : null}
             {subTab === 'menu' ? <RestaurantMenuPanel /> : null}
-            {subTab === 'tables' ? <VerticalRecordsPanel table="restaurant_tables" title="Tables" fields={['label', 'seats']} /> : null}
+            {subTab === 'tables' ? <RestaurantTablesPanel /> : null}
             {subTab === 'listings' ? <VerticalRecordsPanel table="listings" title="Listings" fields={['title', 'price', 'area_name', 'status']} /> : null}
             {subTab === 'viewings' ? <VerticalRecordsPanel table="viewings" title="Viewings" fields={['starts_at', 'status']} /> : null}
             {subTab === 'leads' ? (
-              vertical === 'wellness' ? (
-                <WellnessPanel mode="leads" />
+              vertical === 'education' ? (
+                <EducationPanel mode="leads" />
+              ) : vertical === 'healthcare' ? (
+                <VerticalRecordsPanel table="healthcare_leads" title="Leads" fields={['reason', 'urgency_level', 'status']} />
+              ) : (vertical === 'wellness' || vertical === 'service') ? (
+                <WellnessPanel mode="leads" variant={vertical === 'service' ? 'service' : 'wellness'} />
               ) : (
                 <VerticalRecordsPanel table="leads" title="Leads" fields={['status', 'intent', 'notes']} />
               )
@@ -277,17 +360,22 @@ export function MainScreen({
             {subTab === 'agents' ? <VerticalRecordsPanel table="agents" title="Agents" fields={['name', 'phone', 'email']} /> : null}
             {subTab === 'staff' ? <WellnessPanel mode="staff" /> : null}
             {subTab === 'doctors' ? <VerticalRecordsPanel table="healthcare_doctors" title="Doctors" fields={['name', 'email']} /> : null}
-            {subTab === 'catalog' || subTab === 'services' ? <WellnessPanel mode="catalog" /> : null}
+            {subTab === 'catalog' || subTab === 'services' ? (
+              <WellnessPanel
+                mode={subTab === 'services' || isService ? 'services' : 'catalog'}
+                variant={isService ? 'service' : 'wellness'}
+              />
+            ) : null}
             {subTab === 'packages' ? <WellnessPanel mode="packages" /> : null}
-            {subTab === 'sessions' ? <WellnessPanel mode="sessions" /> : null}
+            {subTab === 'sessions' ? <WellnessPanel mode="sessions" variant={isService ? 'service' : 'wellness'} /> : null}
             {subTab === 'appointments' ? <VerticalRecordsPanel table="healthcare_appointments" title="Calendar" fields={['patient_name', 'scheduled_at', 'status']} /> : null}
-            {subTab === 'courses' ? <VerticalRecordsPanel table="education_courses" title="Courses" fields={['name', 'price', 'age_group']} /> : null}
-            {subTab === 'enrollments' ? <VerticalRecordsPanel table="education_enrollments" title="Enrollments" fields={['student_name', 'status', 'created_at']} /> : null}
+            {subTab === 'courses' ? <EducationPanel mode="courses" /> : null}
+            {subTab === 'enrollments' ? <EducationPanel mode="enrollments" /> : null}
             {subTab === 'specialties' ? <VerticalRecordsPanel table="healthcare_specialties" title="Specialties" fields={['name']} /> : null}
             {subTab === 'labs' ? <VerticalRecordsPanel table="healthcare_lab_results" title="Labs" fields={['patient_name', 'status']} /> : null}
             {subTab === 'triage' ? <VerticalRecordsPanel table="healthcare_leads" title="Triage" fields={['reason', 'urgency_level', 'status']} /> : null}
             {![
-              'home', 'orders', 'crm', 'interested', 'flagged', 'campaigns', 'ai_issues',
+              'home', 'orders', 'crm', 'no_order', 'interested', 'flagged', 'campaigns', 'ai_issues',
               'reservations', 'menu', 'tables', 'listings', 'viewings', 'leads', 'agents',
               'staff', 'doctors', 'catalog', 'services', 'packages', 'sessions', 'appointments',
               'courses', 'enrollments', 'specialties', 'labs', 'triage',
@@ -314,6 +402,7 @@ export function MainScreen({
             orders: pendingOrdersCount,
             chats: contacts.reduce((n, c) => n + ((c.unreadCount ?? 0) > 0 ? 1 : 0), 0),
             interested: interestedCount,
+            no_order: showNoOrder ? noOrderCount : 0,
             flagged: unresolvedFlagged.length,
             ai_issues: unresolvedFlagged.length,
           }}
@@ -356,6 +445,12 @@ export function MainScreen({
         />
         <Button title="Cancel" variant="ghost" onPress={() => setShowNewChat(false)} />
       </KeyboardSheet>
+      <InstagramPagePicker
+        visible={igConnect.pickerVisible}
+        pages={igConnect.pages ?? []}
+        onSelect={igConnect.selectPage}
+        onCancel={igConnect.clearPicker}
+      />
     </View>
   );
 }

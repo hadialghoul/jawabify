@@ -42,6 +42,8 @@ import { SuperAdminPaymentsPanel } from '../components/superadmin/PaymentsPanel'
 import { SuperAdminAlertsPanel } from '../components/superadmin/AlertsPanel';
 import { SuperAdminBroadcastPanel } from '../components/superadmin/BroadcastPanel';
 import { SuperAdminLeadsPanel } from '../components/superadmin/LeadsPanel';
+import { SuperAdminCampaigns } from '../components/superadmin/SuperAdminCampaigns';
+import { KeyboardSheet } from '../components/KeyboardSheet';
 import { invalidateCache } from '../lib/dataCache';
 
 type AdminView =
@@ -55,6 +57,15 @@ type AdminView =
   | 'broadcast'
   | 'campaigns'
   | 'leads';
+
+const USER_LEAD_TAGS = [
+  { value: 'new', label: 'New', color: '#2563EB' },
+  { value: 'interested', label: 'Interested', color: '#059669' },
+  { value: 'follow_up', label: 'Follow up', color: '#D97706' },
+  { value: 'not_interested', label: 'Not interested', color: '#991B1B' },
+] as const;
+
+type UserLeadStatus = (typeof USER_LEAD_TAGS)[number]['value'];
 
 const TABS: { id: AdminView; label: string; icon: typeof Users }[] = [
   { id: 'analytics', label: 'Overview', icon: TrendingUp },
@@ -113,7 +124,10 @@ export function SuperAdminScreen({
   const [payments, setPayments] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any>(null);
   const [leads, setLeads] = useState<any[]>([]);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [confirmName, setConfirmName] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [userTags, setUserTags] = useState<Record<string, UserLeadStatus>>({});
 
   const loadOverview = async () => {
     setLoading(true);
@@ -138,6 +152,21 @@ export function SuperAdminScreen({
   }, [isSuperAdmin, session?.access_token]);
 
   useEffect(() => {
+    if (!isSuperAdmin) return;
+    supabase
+      .from('user_lead_tags' as any)
+      .select('user_id, lead_status')
+      .then(({ data: rows }) => {
+        const map: Record<string, UserLeadStatus> = {};
+        (rows as any[] | null)?.forEach((row) => {
+          const status = USER_LEAD_TAGS.some((tag) => tag.value === row.lead_status) ? row.lead_status : 'new';
+          map[row.user_id] = status;
+        });
+        setUserTags(map);
+      });
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
     if (view === 'payments') {
       supabase.functions.invoke('super-admin-payments', { body: { limit: 100 } }).then(({ data: res }) => {
         setPayments(res?.charges ?? []);
@@ -160,12 +189,28 @@ export function SuperAdminScreen({
         .limit(200)
         .then(({ data: rows }) => setLeads(rows ?? []));
     }
-    if (view === 'campaigns') {
-      supabase.from('campaigns').select('*').order('created_at', { ascending: false }).limit(50).then(({ data: rows }) => {
-        setCampaigns(rows ?? []);
-      });
-    }
   }, [view]);
+
+  const setUserTag = (userId: string, status: UserLeadStatus) => {
+    const previous = userTags[userId] ?? 'new';
+    setUserTags((current) => ({ ...current, [userId]: status }));
+    supabase
+      .from('user_lead_tags' as any)
+      .upsert({ user_id: userId, lead_status: status, updated_at: new Date().toISOString() } as any, { onConflict: 'user_id' })
+      .then(({ error: tagError }) => {
+        if (tagError) {
+          toast.error('Could not save tag');
+          setUserTags((current) => ({ ...current, [userId]: previous }));
+        }
+      });
+  };
+
+  const chooseUserTag = (userId: string, name: string) => {
+    Alert.alert('Lead status', name, [
+      ...USER_LEAD_TAGS.map((tag) => ({ text: tag.label, onPress: () => setUserTag(userId, tag.value) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
 
   const manage = (tenantId: string | null, name: string) => {
     if (!tenantId) {
@@ -175,6 +220,35 @@ export function SuperAdminScreen({
     invalidateCache();
     startActingAs(tenantId, name);
     toast.success('Managing ' + name);
+  };
+
+  const askDelete = (tenantId: string | null, tenantName: string) => {
+    if (!tenantId) return;
+    setConfirmName('');
+    setDeleteTarget({ id: tenantId, name: tenantName });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || confirmName.trim() !== deleteTarget.name) {
+      toast.error(`Type ${deleteTarget?.name ?? 'the account name'} to confirm`);
+      return;
+    }
+    setDeleting(true);
+    try {
+      const { data: res, error: err } = await supabase.functions.invoke('super-admin-delete-tenant', {
+        body: { tenant_id: deleteTarget.id },
+      });
+      if (err) throw err;
+      if ((res as any)?.error) throw new Error((res as any).error);
+      toast.success(`${deleteTarget.name} and all of its data were deleted`);
+      setDeleteTarget(null);
+      setConfirmName('');
+      loadOverview();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Failed to delete the account');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const grantDays = (userId: string | null, tenantName: string) => {
@@ -318,13 +392,14 @@ export function SuperAdminScreen({
           <Text style={{ color: colors.destructive, textAlign: 'center', padding: 16 }}>{error}</Text>
           <Button title="Retry" onPress={loadOverview} />
         </View>
-      ) : ['messages', 'payments', 'alerts', 'broadcast', 'leads'].includes(view) ? (
-        <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }}>
+      ) : ['messages', 'payments', 'alerts', 'broadcast', 'leads', 'campaigns'].includes(view) ? (
+        <View style={{ flex: 1, minHeight: 0, paddingHorizontal: 16, paddingTop: 8 }}>
           {view === 'messages' ? <SuperAdminInbox /> : null}
           {view === 'payments' ? <SuperAdminPaymentsPanel /> : null}
           {view === 'alerts' ? <SuperAdminAlertsPanel /> : null}
           {view === 'broadcast' ? <SuperAdminBroadcastPanel /> : null}
           {view === 'leads' ? <SuperAdminLeadsPanel /> : null}
+          {view === 'campaigns' ? <SuperAdminCampaigns /> : null}
         </View>
       ) : (
         <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Math.max(insets.bottom, 24) + 72 }]} keyboardShouldPersistTaps="handled">
@@ -389,19 +464,25 @@ export function SuperAdminScreen({
           )}
 
           {view === 'users' &&
-            users.map((r) => (
-              <Pressable
-                key={r.userId}
-                style={styles.card}
-                onPress={() => manage(r.tenant?.id ?? null, r.tenant?.name ?? r.email ?? 'Account')}
-              >
+            users.map((r) => {
+              const tag = USER_LEAD_TAGS.find((item) => item.value === (userTags[r.userId] || 'new')) || USER_LEAD_TAGS[0];
+              return (
+              <View key={r.userId} style={styles.card}>
                 <Text style={styles.name}>{r.email ?? r.userId}</Text>
                 {r.profile?.display_name ? <Text style={styles.meta}>{r.profile.display_name}</Text> : null}
                 <View style={styles.row}>
                   {r.tenant ? <Badge label={r.tenant.name} /> : <Badge label="No tenant" tone="muted" />}
                   {r.sub ? <Badge label={r.sub.status} tone="success" /> : null}
                 </View>
-                <Text style={styles.meta}>Signed up {format(new Date(r.created_at), 'MMM d, yyyy')}</Text>
+                <Pressable onPress={() => chooseUserTag(r.userId, r.email ?? 'User')} style={styles.statusBtn}>
+                  <View style={[styles.dot, { backgroundColor: tag.color }]} />
+                  <Text style={[styles.statusText, { color: tag.color }]}>{tag.label}</Text>
+                </Pressable>
+                <Text style={styles.meta}>Signed up {format(new Date(r.created_at), 'MMM d, yyyy · h:mm a')}</Text>
+                <Text style={styles.meta}>
+                  Last sign-in{' '}
+                  {r.last_sign_in_at ? format(new Date(r.last_sign_in_at), 'MMM d, yyyy · h:mm a') : 'never'}
+                </Text>
                 {r.counts ? (
                   <Text style={styles.meta}>
                     {r.counts.contacts} contacts · {r.counts.messages} messages
@@ -415,18 +496,32 @@ export function SuperAdminScreen({
                     disabled={!r.tenant}
                     onPress={() => manage(r.tenant?.id ?? null, r.tenant?.name ?? r.email ?? 'Account')}
                   />
+                  {r.tenant ? (
+                    <Button
+                      title="Delete user"
+                      variant="destructive"
+                      icon={<Trash2 size={14} color="#fff" />}
+                      onPress={() => askDelete(r.tenant.id, r.tenant.name)}
+                    />
+                  ) : null}
                 </View>
-              </Pressable>
-            ))}
+              </View>
+              );
+            })}
 
           {view === 'tenants' &&
             tenants.map((t) => {
               const owner = data?.emailMap[t.owner_user_id]?.email;
+              const lastSignInAt = data?.emailMap[t.owner_user_id]?.last_sign_in_at;
+              const lastSignInLabel = typeof lastSignInAt === 'string'
+                ? format(new Date(lastSignInAt), 'MMM d, yyyy · h:mm a')
+                : 'never';
               const c = data?.counts[t.id] ?? { contacts: 0, messages: 0 };
               return (
-                <Pressable key={t.id} style={styles.card} onPress={() => manage(t.id, t.name)}>
+                <View key={t.id} style={styles.card}>
                   <Text style={styles.name}>{t.name}</Text>
-                  <Text style={styles.meta}>{owner}</Text>
+                  <Text style={styles.meta}>{owner || '—'}</Text>
+                  <Text style={styles.meta}>Last sign-in {lastSignInLabel}</Text>
                   <Text style={styles.meta}>
                     {c.contacts} contacts · {c.messages} messages
                   </Text>
@@ -437,8 +532,14 @@ export function SuperAdminScreen({
                       icon={<Eye size={14} color="#fff" />}
                       onPress={() => manage(t.id, t.name)}
                     />
+                    <Button
+                      title="Delete tenant"
+                      variant="destructive"
+                      icon={<Trash2 size={14} color="#fff" />}
+                      onPress={() => askDelete(t.id, t.name)}
+                    />
                   </View>
-                </Pressable>
+                </View>
               );
             })}
 
@@ -468,16 +569,6 @@ export function SuperAdminScreen({
             <SuperAdminLeadsPanel />
           ) : null}
 
-          {view === 'campaigns' &&
-            campaigns.map((c) => (
-              <View key={c.id} style={styles.card}>
-                <Text style={styles.name}>{c.name}</Text>
-                <Text style={styles.meta}>
-                  {c.status} · {c.sent_count}/{c.total_recipients}
-                </Text>
-              </View>
-            ))}
-
           {view === 'broadcast' ? (
             <SuperAdminBroadcastPanel />
           ) : null}
@@ -489,6 +580,25 @@ export function SuperAdminScreen({
           </View>
         </ScrollView>
       )}
+      <KeyboardSheet
+        visible={!!deleteTarget}
+        onClose={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+      >
+        <Text style={styles.name}>Delete {deleteTarget?.name} permanently?</Text>
+        <Text style={styles.meta}>
+          This erases chats, contacts, orders, settings, team logins, and billing. It cannot be undone. Type the account name to confirm.
+        </Text>
+        <Input placeholder={deleteTarget?.name} value={confirmName} onChangeText={setConfirmName} autoCapitalize="none" />
+        <Button
+          title={deleting ? 'Deleting…' : 'Delete forever'}
+          variant="destructive"
+          loading={deleting}
+          disabled={confirmName.trim() !== deleteTarget?.name}
+          onPress={confirmDelete}
+        />
+      </KeyboardSheet>
     </View>
   );
 }
@@ -496,7 +606,7 @@ export function SuperAdminScreen({
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
-  tabBar: { maxHeight: 52, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card },
+  tabBar: { height: 52, maxHeight: 52, flexGrow: 0, flexShrink: 0, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card },
   tabs: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: 'center' },
   tab: {
     flexDirection: 'row',
@@ -530,6 +640,19 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 6,
   },
+  statusBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
   name: { fontWeight: '700', color: colors.foreground },
   meta: { fontSize: 12, color: colors.mutedForeground },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },

@@ -20,30 +20,38 @@ import { colors, radius } from '../../theme';
 
 type Panel = 'catalog' | 'sessions' | 'leads' | 'staff';
 
-export function WellnessPanel({ mode }: { mode: Panel | 'services' | 'packages' }) {
+export function WellnessPanel({ mode, variant = 'wellness' }: { mode: Panel | 'services' | 'packages'; variant?: 'wellness' | 'service' }) {
   const panel: Panel = mode === 'services' || mode === 'packages' ? 'catalog' : mode;
   const initialSub = mode === 'packages' ? 'packages' : 'services';
 
-  if (panel === 'catalog') return <CatalogPanel initial={initialSub} />;
-  if (panel === 'sessions') return <SessionsPanel />;
-  if (panel === 'leads') return <LeadsPanel />;
+  if (panel === 'catalog') return <CatalogPanel initial={initialSub} variant={variant} />;
+  if (panel === 'sessions') return <SessionsPanel variant={variant} />;
+  if (panel === 'leads') return <LeadsPanel variant={variant} />;
   return <StaffPanel />;
 }
 
-function CatalogPanel({ initial }: { initial: 'services' | 'packages' }) {
+function CatalogPanel({ initial, variant = 'wellness' }: { initial: 'services' | 'packages'; variant?: 'wellness' | 'service' }) {
   const [sub, setSub] = useState<'services' | 'packages'>(initial);
+  const servicesOnly = variant === 'service' || initial === 'services';
+  if (servicesOnly && variant === 'service') {
+    return (
+      <View style={{ flex: 1 }}>
+        <ServicesPanel variant={variant} />
+      </View>
+    );
+  }
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.switchRow}>
         <Button title="Services" variant={sub === 'services' ? 'primary' : 'outline'} icon={<Sparkles size={14} color={sub === 'services' ? '#fff' : colors.foreground} />} onPress={() => setSub('services')} />
         <Button title="Packages" variant={sub === 'packages' ? 'primary' : 'outline'} icon={<PkgIcon size={14} color={sub === 'packages' ? '#fff' : colors.foreground} />} onPress={() => setSub('packages')} />
       </View>
-      {sub === 'services' ? <ServicesPanel /> : <PackagesPanel />}
+      {sub === 'services' ? <ServicesPanel variant={variant} /> : <PackagesPanel />}
     </View>
   );
 }
 
-function ServicesPanel() {
+function ServicesPanel({ variant = 'wellness' }: { variant?: 'wellness' | 'service' }) {
   const { items, create, update, remove, loading } = useWellnessServices();
   const [editing, setEditing] = useState<Partial<WellnessService> | null>(null);
   const [form, setForm] = useState<Partial<WellnessService>>({});
@@ -64,7 +72,11 @@ function ServicesPanel() {
       <View style={styles.head}>
         <View style={{ flex: 1 }}>
           <Text style={styles.h1}>Services</Text>
-          <Text style={styles.sub}>What the AI offers and books.</Text>
+          <Text style={styles.sub}>
+            {variant === 'service'
+              ? 'What you offer, how long it takes and what it costs — the AI quotes and books from this list.'
+              : 'What the AI offers and books.'}
+          </Text>
         </View>
         <Button title="Add service" icon={<Plus size={14} color="#fff" />} onPress={openNew} />
       </View>
@@ -227,7 +239,7 @@ function PackagesPanel() {
   );
 }
 
-function SessionsPanel() {
+function SessionsPanel({ variant = 'wellness' }: { variant?: 'wellness' | 'service' }) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const rangeEnd = addDays(weekStart, 7);
   const { sessions, loading, create, update, remove, refresh } = useWellnessSessions(weekStart, rangeEnd);
@@ -313,12 +325,16 @@ function SessionsPanel() {
             <Button key={s.id} title={s.name} variant={form.service_id === s.id ? 'primary' : 'outline'} onPress={() => setForm({ ...form, service_id: s.id, duration_min: s.duration_min })} />
           ))}
         </ScrollView>
-        <Text style={styles.meta}>Staff</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.switchRow}>
-          {staff.map((s) => (
-            <Button key={s.id} title={s.name} variant={form.staff_id === s.id ? 'primary' : 'outline'} onPress={() => setForm({ ...form, staff_id: s.id })} />
-          ))}
-        </ScrollView>
+        {variant !== 'service' ? (
+          <>
+            <Text style={styles.meta}>Staff</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.switchRow}>
+              {staff.map((s) => (
+                <Button key={s.id} title={s.name} variant={form.staff_id === s.id ? 'primary' : 'outline'} onPress={() => setForm({ ...form, staff_id: s.id })} />
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
         <Button
           title="Save"
           onPress={async () => {
@@ -354,20 +370,34 @@ function SessionsPanel() {
   );
 }
 
-function LeadsPanel() {
+const SERVICE_LEAD_STATUS_LABELS: Record<string, string> = {
+  new: 'New enquiry',
+  qualified: 'Interested',
+  booked: 'Booked',
+  completed: 'Done',
+  no_show: 'No-show / lost',
+};
+
+function LeadsPanel({ variant = 'wellness' }: { variant?: 'wellness' | 'service' }) {
   const { items, create, update, remove, loading } = useWellnessLeads();
   const [editing, setEditing] = useState<Partial<WellnessLead> | null>(null);
   const [form, setForm] = useState<Partial<WellnessLead>>({});
+  const isService = variant === 'service';
+  const statusLabel = (s: string) => (isService ? SERVICE_LEAD_STATUS_LABELS[s] || s : s);
 
   return (
     <ScrollView contentContainerStyle={styles.pad}>
       <View style={styles.head}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.h1}>Leads</Text>
-          <Text style={styles.sub}>Prospects interested in bookings.</Text>
+          <Text style={styles.h1}>{isService ? 'Enquiries' : 'Leads'}</Text>
+          <Text style={styles.sub}>
+            {isService
+              ? 'Everyone the AI is talking to — from first enquiry to a booked call, meeting or appointment.'
+              : 'Prospects interested in bookings.'}
+          </Text>
         </View>
         <Button
-          title="Add lead"
+          title={isService ? 'Add enquiry' : 'Add lead'}
           icon={<UserPlus size={14} color="#fff" />}
           onPress={() => {
             const blank = { status: 'new', interest: '', notes: '', source: 'manual', needs_human: false };
@@ -377,7 +407,7 @@ function LeadsPanel() {
         />
       </View>
       {loading ? <ActivityIndicator color={colors.primary} /> : null}
-      {!loading && items.length === 0 ? <Text style={styles.empty}>No leads yet.</Text> : null}
+      {!loading && items.length === 0 ? <Text style={styles.empty}>{isService ? 'No enquiries yet.' : 'No leads yet.'}</Text> : null}
       {items.map((l) => (
         <Pressable
           key={l.id}
@@ -387,24 +417,45 @@ function LeadsPanel() {
             setEditing(l);
           }}
         >
-          <View style={styles.row}>
-            <Badge label={l.status} />
-            {l.needs_human ? <Badge label="Needs human" tone="danger" /> : null}
+          <View style={[styles.row, { justifyContent: 'space-between' }]}>
+            <View style={[styles.row, { flex: 1 }]}>
+              <Badge label={statusLabel(l.status)} />
+              {l.needs_human ? <Badge label="Needs human" tone="danger" /> : null}
+            </View>
+            <Pressable
+              hitSlop={10}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                Alert.alert(isService ? 'Delete enquiry?' : 'Delete lead?', '', [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                      await remove(l.id);
+                    },
+                  },
+                ]);
+              }}
+              style={styles.icon}
+            >
+              <Trash2 size={16} color={colors.destructive} />
+            </Pressable>
           </View>
-          <Text style={styles.name}>{l.interest || 'Lead'}</Text>
+          <Text style={styles.name}>{l.interest || (isService ? 'Enquiry' : 'Lead')}</Text>
           {l.notes ? <Text style={styles.meta}>{l.notes}</Text> : null}
           <Text style={styles.meta}>{format(new Date(l.created_at), 'MMM d, yyyy')}</Text>
         </Pressable>
       ))}
 
       <KeyboardSheet visible={!!editing} onClose={() => setEditing(null)}>
-        <Text style={styles.h1}>{form.id ? 'Edit lead' : 'New lead'}</Text>
+        <Text style={styles.h1}>{form.id ? (isService ? 'Edit enquiry' : 'Edit lead') : isService ? 'New enquiry' : 'New lead'}</Text>
         <Input placeholder="Interest" value={form.interest || ''} onChangeText={(v) => setForm({ ...form, interest: v })} />
         <Input placeholder="Notes" value={form.notes || ''} onChangeText={(v) => setForm({ ...form, notes: v })} multiline />
         <Text style={styles.meta}>Status</Text>
         <ScrollView horizontal contentContainerStyle={styles.switchRow}>
           {['new', 'qualified', 'booked', 'completed', 'no_show'].map((s) => (
-            <Button key={s} title={s} variant={form.status === s ? 'primary' : 'outline'} onPress={() => setForm({ ...form, status: s })} />
+            <Button key={s} title={statusLabel(s)} variant={form.status === s ? 'primary' : 'outline'} onPress={() => setForm({ ...form, status: s })} />
           ))}
         </ScrollView>
         <View style={styles.row}>
@@ -424,7 +475,7 @@ function LeadsPanel() {
             title="Delete"
             variant="destructive"
             onPress={() =>
-              Alert.alert('Delete lead?', '', [
+              Alert.alert(isService ? 'Delete enquiry?' : 'Delete lead?', '', [
                 { text: 'Cancel', style: 'cancel' },
                 {
                   text: 'Delete',
