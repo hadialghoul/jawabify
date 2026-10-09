@@ -80,7 +80,7 @@ export function QuickAnswersCard() {
           audio_mime.split('/')[1]?.replace('x-m4a', 'm4a').replace('mpeg', 'mp3') ||
           audioName?.split('.').pop() ||
           'mp3';
-        const pathName = `quick-answers/${tenantId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const pathName = `${tenantId}/quick-answers/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
         const fileRes = await fetch(audioUri);
         const blob = await fileRes.blob();
         const { data: up, error } = await supabase.storage

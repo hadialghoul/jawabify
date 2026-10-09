@@ -242,27 +242,15 @@ export function SuperAdminInbox() {
         .maybeSingle();
       let tid = mem?.tenant_id as string | null;
       if (!tid) {
-        const { data: created, error } = await supabase
-          .from('tenants')
-          .insert({
-            name: 'Super Admin Inbox',
-            owner_user_id: user.id,
-            vertical: 'service',
-            ai_replies_enabled: false,
-          } as any)
-          .select('id')
-          .single();
-        if (error || !created) {
-          toast.error(error?.message || 'Failed to create admin inbox');
+        const { data: created, error } = await supabase.functions.invoke('create-tenant', {
+          body: { name: 'Super Admin Inbox', vertical: 'service' },
+        });
+        if (error || !created?.tenant_id) {
+          toast.error(error?.message || created?.error || 'Failed to create admin inbox');
           setBooting(false);
           return;
         }
-        await supabase.from('tenant_members').insert({
-          tenant_id: created.id,
-          user_id: user.id,
-          role: 'owner',
-        } as any);
-        tid = created.id;
+        tid = created.tenant_id;
       }
       setTenantId(tid);
       setBooting(false);

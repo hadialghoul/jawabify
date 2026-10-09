@@ -91,7 +91,7 @@ export async function openStartTrialSession(
 ): Promise<BillingSessionResult> {
   let lastError = 'Could not start checkout';
 
-  for (const environment of ['live', 'sandbox'] as const) {
+  for (const environment of ['live'] as const) {
     const { clientSecret, error } = await createEmbeddedCheckout(environment, priceId);
     if (clientSecret) {
       return openEmbeddedStripeCheckout(clientSecret, environment);

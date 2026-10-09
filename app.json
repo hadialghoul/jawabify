@@ -7,11 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "jawabify",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#11112C"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jawabify.app",
@@ -31,7 +26,9 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.jawabify.app",
       "softwareKeyboardLayoutMode": "resize",
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "blockedPermissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -42,8 +39,15 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "category": ["BROWSABLE", "DEFAULT"],
-          "data": [{ "scheme": "jawabify" }]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "jawabify"
+            }
+          ]
         }
       ]
     },
@@ -57,6 +61,14 @@
     },
     "plugins": [
       [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#11112C",
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Jawabify uses your photos to send images in chats.",
@@ -69,7 +81,8 @@
         {
           "microphonePermission": "Jawabify uses the microphone to record voice messages."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "extra": {
       "eas": {

@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { AlertCircle, Check, CheckCheck, Clock, Mic, Pause, Play } from 'lucide-react-native';
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Message } from '../types';
-import { looksLikeAudio, looksLikeImage, mediaPlaceholder } from '../lib/chatMedia';
+import { looksLikeAudio, looksLikeImage, mediaPlaceholder, signedChatMediaUrl } from '../lib/chatMedia';
 import { colors, radius } from '../theme';
 
 const PLACEHOLDERS = ['📷 Photo', '🎤 Voice message', '🎬 Video'];
@@ -22,7 +22,33 @@ export function MessageBubble({
   const hasAudio = looksLikeAudio(message.mediaType, message.mediaUrl);
   const [playing, setPlaying] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [displayUrl, setDisplayUrl] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    const source = message.mediaUrl;
+    if (!source) {
+      setDisplayUrl(undefined);
+      return;
+    }
+    if (/^(file|content|data|blob):/i.test(source) || !source.includes('/chat-media/')) {
+      setDisplayUrl(source);
+      return;
+    }
+    setDisplayUrl(undefined);
+    signedChatMediaUrl(source).then((url) => {
+      if (!cancelled) setDisplayUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [message.mediaUrl]);
   const playerRef = useRef<AudioPlayer | null>(null);
+  useEffect(() => {
+    return () => {
+      playerRef.current?.remove();
+      playerRef.current = null;
+    };
+  }, [displayUrl]);
   const placeholder = mediaPlaceholder(message.mediaType);
   const hideContent = hasMedia && (PLACEHOLDERS.includes(message.content) || message.content === placeholder);
 
@@ -41,14 +67,14 @@ export function MessageBubble({
       <View style={[styles.bubble, isOutgoing ? styles.sent : styles.received, hasImage && { padding: 0 }]}>
         {hasImage ? (
           <Pressable onPress={() => setPhotoOpen(true)}>
-            <Image source={{ uri: message.mediaUrl }} style={styles.image} />
+            <Image source={{ uri: displayUrl }} style={styles.image} />
           </Pressable>
         ) : null}
         {hasAudio ? (
           <Pressable
             style={styles.audio}
             onPress={async () => {
-              if (!message.mediaUrl) return;
+              if (!displayUrl) return;
               try {
                 if (playerRef.current && playing) {
                   playerRef.current.pause();
@@ -56,7 +82,7 @@ export function MessageBubble({
                   return;
                 }
                 await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
-                const player = playerRef.current ?? createAudioPlayer(message.mediaUrl);
+                const player = playerRef.current ?? createAudioPlayer(displayUrl);
                 playerRef.current = player;
                 setPlaying(true);
                 player.play();
@@ -88,7 +114,7 @@ export function MessageBubble({
       </View>
       <Modal visible={photoOpen} transparent animationType="fade" onRequestClose={() => setPhotoOpen(false)}>
         <Pressable style={styles.lightbox} onPress={() => setPhotoOpen(false)}>
-          {message.mediaUrl ? <Image source={{ uri: message.mediaUrl }} style={styles.lightboxImage} resizeMode="contain" /> : null}
+          {displayUrl ? <Image source={{ uri: displayUrl }} style={styles.lightboxImage} resizeMode="contain" /> : null}
         </Pressable>
       </Modal>
     </Pressable>

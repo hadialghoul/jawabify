@@ -5,6 +5,7 @@ import { Contact, Message, MediaFile } from '../types';
 import { useAuth } from './useAuth';
 import { actingHeaders } from '../lib/actingTenant';
 import { mediaPlaceholder } from '../lib/chatMedia';
+import { invokeErrorMessage } from '../lib/functionError';
 import { enqueueSend, mediaStoragePath, uniqueToken, withRetry } from '../lib/sendQueue';
 import { useToast } from './useToast';
 
@@ -250,7 +251,7 @@ export function useMessages() {
         let mediaType: string | undefined;
         try {
           if (mediaFile) {
-            const filePath = mediaStoragePath(contact.id, mediaFile.name);
+            const filePath = mediaStoragePath(tenantId || 'unknown', contact.id, mediaFile.name);
             const res = await withRetry(async () => {
               const fileRes = await fetch(mediaFile.uri);
               const blob = await fileRes.blob();
@@ -323,11 +324,11 @@ export function useMessages() {
           });
         } catch (error) {
           markFailed();
-          toast.error(mediaFile ? `Couldn't send ${mediaFile.name}` : "Couldn't send that message");
+          toast.error(await invokeErrorMessage(error));
         }
       });
     },
-    [memberId, toast],
+    [memberId, tenantId, toast],
   );
 
   const createContact = useCallback(

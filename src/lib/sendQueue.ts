@@ -24,8 +24,9 @@ export function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80) || 'file';
 }
 
-export function mediaStoragePath(contactId: string, fileName: string): string {
-  return `${contactId}/${uniqueToken()}-${safeFileName(fileName)}`;
+/** Uploads must live under the workspace folder or storage rejects them. */
+export function mediaStoragePath(tenantId: string, contactId: string, fileName: string): string {
+  return `${tenantId}/${contactId}/${uniqueToken()}-${safeFileName(fileName)}`;
 }
 
 const TRANSIENT = /429|500|502|503|504|timeout|network|fetch failed|Failed to fetch/i;

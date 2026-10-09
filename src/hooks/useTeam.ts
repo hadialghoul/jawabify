@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { invokeErrorMessage } from '../lib/functionError';
 import { useAuth } from './useAuth';
 
 export interface TeamMember {
@@ -63,8 +64,9 @@ export function useTeam() {
         const { data, error } = await supabase.functions.invoke('manage-team-member', {
           body: { action, tenant_id: tenantId, ...payload },
         });
-        if (error) throw new Error(error.message);
-        if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+        if (error || (data as { error?: string })?.error) {
+          throw new Error(await invokeErrorMessage(error, data));
+        }
         await load();
         return data;
       } finally {

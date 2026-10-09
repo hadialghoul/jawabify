@@ -21,6 +21,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import { actingHeaders } from '../lib/actingTenant';
+import { invokeErrorMessage } from '../lib/functionError';
+import { signedChatMediaUrl } from '../lib/chatMedia';
 import { useGoogleCalendarConnection, useInstagramConnection } from '../hooks/useAppData';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
@@ -38,6 +40,7 @@ import { RestaurantBusinessSettings } from '../components/settings/RestaurantBus
 import { KnowledgeImportCard } from '../components/settings/KnowledgeImportCard';
 import { MenuFileImportCard } from '../components/settings/MenuFileImportCard';
 import { OnlinePaymentsCard } from '../components/settings/OnlinePaymentsCard';
+import { OrderConfirmationCard } from '../components/settings/OrderConfirmationCard';
 import { QuickAnswersCard } from '../components/settings/QuickAnswersCard';
 import { useTenantVertical } from '../hooks/useAppData';
 import { verticalMeta } from '../lib/verticals';
@@ -166,7 +169,15 @@ export function SettingsScreen({
         setShopifyConnected(true);
         setShopDomain(shop.shop_domain || '');
       }
-      if (images) setKnowledgeImages(images as KnowledgeImage[]);
+      if (images) {
+        const signed = await Promise.all(
+          (images as KnowledgeImage[]).map(async (img) => ({
+            ...img,
+            image_url: await signedChatMediaUrl(img.image_url),
+          })),
+        );
+        setKnowledgeImages(signed);
+      }
       setLoading(false);
     })();
   }, [tenantId]);
@@ -316,8 +327,11 @@ export function SettingsScreen({
                       style: 'destructive',
                       onPress: async () => {
                         if (!tenantId) return;
-                        const { error } = await supabase.from('tenant_credentials').update({ is_active: false }).eq('tenant_id', tenantId).eq('provider', 'whatsapp_cloud');
-                        if (error) toast.error('Failed to disconnect from Meta');
+                        const { data, error } = await supabase.functions.invoke('disconnect-channel', {
+                          headers: actingHeaders(),
+                          body: { provider: 'whatsapp_cloud', tenantId },
+                        });
+                        if (error || data?.error) toast.error(await invokeErrorMessage(error, data));
                         else {
                           setWaConnected(false);
                           setWaPhone('');
@@ -371,8 +385,11 @@ export function SettingsScreen({
                   variant="outline"
                   onPress={async () => {
                     if (!tenantId) return;
-                    const { error } = await supabase.from('tenant_credentials').delete().eq('tenant_id', tenantId).eq('provider', 'shopify');
-                    if (error) toast.error('Failed to disconnect Shopify store');
+                    const { data, error } = await supabase.functions.invoke('disconnect-channel', {
+                      headers: actingHeaders(),
+                      body: { provider: 'shopify', tenantId },
+                    });
+                    if (error || data?.error) toast.error(await invokeErrorMessage(error, data));
                     else {
                       setShopifyConnected(false);
                       setShopDomain('');
@@ -398,10 +415,33 @@ export function SettingsScreen({
                         headers: actingHeaders(),
                         body: { shop: shopDomain.trim(), tenant_id: tenantId },
                       });
-                      if (error) throw error;
-                      if (data?.error) throw new Error(data.error);
-                      if (data?.install_url) await WebBrowser.openBrowserAsync(data.install_url);
-                      else toast.error('Failed to start Shopify connection');
+                      if (error || data?.error) throw new Error(await invokeErrorMessage(error, data));
+                      if (!data?.install_url) {
+                        toast.error('Failed to start Shopify connection');
+                        return;
+                      }
+                      const result = await WebBrowser.openAuthSessionAsync(
+                        data.install_url,
+                        `${APP_ORIGIN}/shopify/connect`,
+                      );
+                      if (result.type !== 'success' || !result.url) return;
+                      const returned = new URL(result.url);
+                      const shop = returned.searchParams.get('shop') || shopDomain.trim();
+                      const claim = returned.searchParams.get('claim');
+                      if (!claim) {
+                        toast.error('Shopify did not return a connection code. Try connecting again.');
+                        return;
+                      }
+                      const claimed = await supabase.functions.invoke('shopify-claim-install', {
+                        headers: actingHeaders(),
+                        body: { shop, tenant_id: tenantId, claim },
+                      });
+                      if (claimed.error || claimed.data?.error) {
+                        throw new Error(await invokeErrorMessage(claimed.error, claimed.data));
+                      }
+                      setShopifyConnected(true);
+                      setShopDomain(claimed.data?.shop || shop);
+                      toast.success('Shopify store connected');
                     } catch (e: any) {
                       toast.error(e?.message || 'Failed to connect Shopify.');
                     } finally {
@@ -495,8 +535,11 @@ export function SettingsScreen({
                       style: 'destructive',
                       onPress: async () => {
                         if (!tenantId) return;
-                        const { error } = await supabase.from('tenant_credentials').update({ is_active: false }).eq('tenant_id', tenantId).eq('provider', 'instagram');
-                        if (error) toast.error('Failed to disconnect Instagram');
+                        const { data, error } = await supabase.functions.invoke('disconnect-channel', {
+                          headers: actingHeaders(),
+                          body: { provider: 'instagram', tenantId },
+                        });
+                        if (error || data?.error) toast.error(await invokeErrorMessage(error, data));
                         else {
                           await instagram.refresh();
                           toast.success('Instagram disconnected from Meta');
@@ -572,6 +615,10 @@ export function SettingsScreen({
               />
             ) : null}
           </Card>
+
+          {(vertical === 'ecommerce' || vertical === 'service' || vertical === 'restaurant') ? (
+            <OrderConfirmationCard />
+          ) : null}
 
           {(vertical === 'service' || vertical === 'restaurant') ? (
             <>
@@ -669,7 +716,7 @@ export function SettingsScreen({
                 try {
                   for (const uri of pendingUris) {
                     const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
-                    const filePath = `knowledge/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+                    const filePath = `${tenantId}/knowledge/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
                     const fileRes = await fetch(uri);
                     const blob = await fileRes.blob();
                     const { data: uploadData, error: uploadError } = await supabase.storage.from('chat-media').upload(filePath, blob, {
@@ -690,7 +737,9 @@ export function SettingsScreen({
                       .select()
                       .single();
                     if (insertError) throw insertError;
-                    setKnowledgeImages((prev) => [imgData as KnowledgeImage, ...prev]);
+                    const saved = imgData as KnowledgeImage;
+                    saved.image_url = await signedChatMediaUrl(saved.image_url);
+                    setKnowledgeImages((prev) => [saved, ...prev]);
                   }
                   toast.success(`${pendingUris.length} image(s) added for "${newImageLabel.trim()}"`);
                   setNewImageLabel('');

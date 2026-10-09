@@ -53,11 +53,14 @@ export function useSubscription() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(20);
-    let own = ((data as SubscriptionRecord[] | null) ?? []).find(isRecordActive) ?? (data as any)?.[0] ?? null;
+    const live = (rows: SubscriptionRecord[] | null | undefined) =>
+      (rows ?? []).filter((s) => s.environment === 'live');
+    const ownRows = live(data as SubscriptionRecord[] | null);
+    let own = ownRows.find(isRecordActive) ?? null;
     if (!own && tenantId) {
       const { data: rows } = await supabase.rpc('get_tenant_subscription', { p_tenant_id: tenantId });
-      const list = (rows as SubscriptionRecord[] | null) ?? [];
-      own = list.find(isRecordActive) ?? list[0] ?? null;
+      const list = live(rows as SubscriptionRecord[] | null);
+      own = list.find(isRecordActive) ?? null;
     }
     setSubscription(own);
     setLoading(false);

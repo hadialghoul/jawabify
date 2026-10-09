@@ -22,10 +22,8 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function portalEnvs(subscription: { environment?: string | null } | null | undefined): Array<'live' | 'sandbox'> {
-  const env = subscription?.environment;
-  if (env === 'live' || env === 'sandbox') return [env];
-  return ['live', 'sandbox'];
+function portalEnvs(): Array<'live'> {
+  return ['live'];
 }
 
 const NO_STRIPE_PORTAL_MSG =
@@ -41,7 +39,7 @@ const TRIAL_PERKS = [
 ] as const;
 
 export function BillingCard({ highlight = false }: { highlight?: boolean }) {
-  const { user } = useAuth();
+  const { user, isTenantAdmin } = useAuth();
   const { subscription, loading, isGrowth, refetch } = useSubscription();
   const toast = useToast();
   const [opening, setOpening] = useState(false);
@@ -90,7 +88,7 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
         return;
       }
 
-      const envs = portalEnvs(subscription);
+      const envs = portalEnvs();
       let lastMessage = 'Could not open billing portal';
 
       for (const environment of envs) {
@@ -130,7 +128,7 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
   const cancelPlan = async () => {
     setCancelling(true);
     try {
-      const envs = portalEnvs(subscription);
+      const envs = portalEnvs();
       let lastMessage = 'Could not cancel';
       let lastData: any = null;
 
@@ -248,7 +246,7 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
           <Text style={styles.sub}>
             {status === 'trialing' ? 'Trial ends' : willCancel ? 'Access until' : 'Next charge'}: {formatDate(periodEnd)}
           </Text>
-          {canUpgradeToGrowth ? (
+          {canUpgradeToGrowth && isTenantAdmin ? (
             <>
               <Button
                 title={opening ? 'Opening\u2026' : 'Upgrade to Growth'}
@@ -260,7 +258,7 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
               </Text>
             </>
           ) : null}
-          {!isShopify && hasStripeCustomer ? (
+          {!isShopify && hasStripeCustomer && isTenantAdmin ? (
             <Button
               title={opening ? 'Opening\u2026' : 'Manage payment & invoices'}
               loading={opening}
@@ -268,10 +266,13 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
               onPress={openPortal}
             />
           ) : null}
-          {!isShopify && !hasStripeCustomer ? (
+          {!isShopify && !hasStripeCustomer && isTenantAdmin ? (
             <Text style={styles.sub}>{NO_STRIPE_PORTAL_MSG}</Text>
           ) : null}
-          {['active', 'trialing', 'past_due'].includes(status) && !willCancel ? (
+          {!isTenantAdmin ? (
+            <Text style={styles.sub}>Only the account owner or an admin can manage billing.</Text>
+          ) : null}
+          {isTenantAdmin && ['active', 'trialing', 'past_due'].includes(status) && !willCancel ? (
             <Button
               title={cancelling ? 'Canceling\u2026' : 'Cancel plan'}
               variant="destructive"
