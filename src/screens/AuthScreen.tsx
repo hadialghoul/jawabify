@@ -4,7 +4,7 @@ import { Check, Eye, EyeOff, X } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
-import { WEB_ORIGIN } from '../config';
+import { APP_ORIGIN, WEB_ORIGIN } from '../config';
 import { VERTICALS } from '../lib/verticals';
 import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
@@ -190,7 +190,7 @@ export function AuthScreen() {
         ) : mode === 'forgot' ? (
           <Card>
             <Text style={styles.title}>Reset Password</Text>
-            <Text style={styles.muted}>Enter your account email. We'll send you a verification link.</Text>
+            <Text style={styles.muted}>Enter your account email. We'll send a link that lasts 1 hour. Open the newest email — it works in any browser or phone.</Text>
             <Input placeholder="you@example.com" autoCapitalize="none" keyboardType="email-address" value={resetEmail} onChangeText={setResetEmail} />
             <Button
               title={sendingReset ? 'Sending...' : 'Send reset link'}
@@ -198,7 +198,7 @@ export function AuthScreen() {
               disabled={!resetEmail.trim()}
               onPress={async () => {
                 setSendingReset(true);
-                const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), { redirectTo: `${WEB_ORIGIN}/reset-password` });
+                const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), { redirectTo: `${APP_ORIGIN}/reset-password` });
                 setSendingReset(false);
                 if (error) toast.error(error.message);
                 else {

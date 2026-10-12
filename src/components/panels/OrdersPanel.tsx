@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDistanceToNow } from 'date-fns';
 import { Package, Plus, Printer, RefreshCw, Trash2 } from 'lucide-react-native';
 import type { Order } from '../../types';
@@ -7,6 +7,7 @@ import { colors, radius } from '../../theme';
 import { Badge, Button, Input } from '../ui';
 import { supabase } from '../../lib/supabase';
 import { actingHeaders } from '../../lib/actingTenant';
+import { invokeErrorMessage } from '../../lib/functionError';
 import { printOrderInvoice } from '../../lib/printInvoice';
 import { useToast } from '../../hooks/useToast';
 import { KeyboardSheet } from '../KeyboardSheet';
@@ -18,11 +19,67 @@ const STATUS: Record<Order['status'], { label: string; tone: 'amber' | 'primary'
   cancelled: { label: 'Cancelled', tone: 'danger' },
 };
 
+const OrderCard = memo(function OrderCard({
+  order,
+  onUpdateStatus,
+  onDeleteOrder,
+}: {
+  order: Order;
+  onUpdateStatus: (id: string, status: Order['status']) => void;
+  onDeleteOrder: (id: string) => void;
+}) {
+  const toast = useToast();
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardTop}>
+        <Text style={styles.id}>#{order.displayId}</Text>
+        {order.shopifyOrderId ? <Badge label="Shopify" tone="muted" /> : null}
+        <Badge label={STATUS[order.status].label} tone={STATUS[order.status].tone} />
+        <Pressable
+          onPress={async () => {
+            try {
+              await printOrderInvoice(order);
+            } catch (e: any) {
+              toast.error(e?.message || 'Could not share invoice');
+            }
+          }}
+          hitSlop={8}
+          accessibilityLabel="Print invoice"
+        >
+          <Printer size={16} color={colors.foreground} />
+        </Pressable>
+        <Pressable
+          onPress={() =>
+            Alert.alert('Delete order', 'Remove this order?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => onDeleteOrder(order.id) },
+            ])
+          }
+        >
+          <Trash2 size={16} color={colors.destructive} />
+        </Pressable>
+      </View>
+      <Text style={styles.product}>{order.productName} × {order.quantity}</Text>
+      <Text style={styles.meta}>{order.customerName} · {order.customerPhone}</Text>
+      {order.customerAddress ? <Text style={styles.meta}>{order.customerAddress}</Text> : null}
+      <Text style={styles.meta}>{formatDistanceToNow(order.createdAt, { addSuffix: true })}</Text>
+      <View style={styles.statuses}>
+        {(['pending', 'processing', 'completed', 'cancelled'] as const).map((s) => (
+          <Pressable key={s} onPress={() => onUpdateStatus(order.id, s)} style={[styles.statusChip, order.status === s && styles.statusChipOn]}>
+            <Text style={[styles.statusText, order.status === s && { color: colors.primary }]}>{STATUS[s].label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+});
+
 export function OrdersPanel({
   orders,
   onUpdateStatus,
   onDeleteOrder,
   onCreateOrder,
+  onSynced,
 }: {
   orders: Order[];
   onUpdateStatus: (id: string, status: Order['status']) => void;
@@ -34,8 +91,17 @@ export function OrdersPanel({
     productName: string;
     quantity: number;
   }) => Promise<unknown>;
+  onSynced?: () => Promise<unknown> | void;
 }) {
   const toast = useToast();
+  const uniqueOrders = useMemo(() => {
+    const seen = new Set<string>();
+    return orders.filter((order) => {
+      if (seen.has(order.id)) return false;
+      seen.add(order.id);
+      return true;
+    });
+  }, [orders]);
   const [open, setOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState({ customerName: '', customerAddress: '', customerPhone: '', productName: '', quantity: '1' });
@@ -43,12 +109,41 @@ export function OrdersPanel({
   const syncShopify = async () => {
     setSyncing(true);
     try {
-      const { data, error } = await supabase.functions.invoke('shopify-api', {
-        headers: actingHeaders(),
-        body: { action: 'sync_orders', params: { since_days: 30, limit: 250 } },
-      });
-      if (error) throw error;
+      const invokeSync = async () => {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        return supabase.functions.invoke('shopify-api', {
+          headers: {
+            ...actingHeaders(),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: { action: 'sync_orders', params: { since_days: 30, limit: 250 } },
+        });
+      };
+      let { data, error } = await invokeSync();
+      if (error && (error as { context?: { status?: number } }).context?.status === 401) {
+        const { error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr) {
+          toast.error('Your login expired — please sign in again.');
+          await supabase.auth.signOut();
+          return;
+        }
+        ({ data, error } = await invokeSync());
+      }
+      if (error) throw new Error(await invokeErrorMessage(error, data));
+      await onSynced?.();
       toast.success(`Synced: +${data?.inserted ?? 0} new, ${data?.updated ?? 0} updated`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      supabase.functions
+        .invoke('shopify-api', {
+          headers: {
+            ...actingHeaders(),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: { action: 'register_webhooks' },
+        })
+        .catch(() => {});
     } catch (e: any) {
       toast.error(e?.message || 'Shopify sync failed');
     } finally {
@@ -68,58 +163,25 @@ export function OrdersPanel({
           <Button title="New" onPress={() => setOpen(true)} icon={<Plus size={14} color="#fff" />} />
         </View>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 8 }}>
-        {orders.length === 0 ? (
+      <FlatList
+        data={uniqueOrders}
+        keyExtractor={(order) => order.id}
+        contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 8 }}
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
+        ListEmptyComponent={
           <View style={styles.empty}>
             <Package size={40} color={colors.mutedForeground} />
             <Text style={styles.emptyTitle}>No orders yet</Text>
             <Text style={styles.sub}>Orders will appear here when customers place them</Text>
           </View>
-        ) : (
-          orders.map((order) => (
-            <View key={order.id} style={styles.card}>
-              <View style={styles.cardTop}>
-                <Text style={styles.id}>#{order.displayId}</Text>
-                <Badge label={STATUS[order.status].label} tone={STATUS[order.status].tone} />
-                <Pressable
-                  onPress={async () => {
-                    try {
-                      await printOrderInvoice(order);
-                    } catch (e: any) {
-                      toast.error(e?.message || 'Could not share invoice');
-                    }
-                  }}
-                  hitSlop={8}
-                  accessibilityLabel="Print invoice"
-                >
-                  <Printer size={16} color={colors.foreground} />
-                </Pressable>
-                <Pressable
-                  onPress={() =>
-                    Alert.alert('Delete order', 'Remove this order?', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => onDeleteOrder(order.id) },
-                    ])
-                  }
-                >
-                  <Trash2 size={16} color={colors.destructive} />
-                </Pressable>
-              </View>
-              <Text style={styles.product}>{order.productName} × {order.quantity}</Text>
-              <Text style={styles.meta}>{order.customerName} · {order.customerPhone}</Text>
-              {order.customerAddress ? <Text style={styles.meta}>{order.customerAddress}</Text> : null}
-              <Text style={styles.meta}>{formatDistanceToNow(order.createdAt, { addSuffix: true })}</Text>
-              <View style={styles.statuses}>
-                {(['pending', 'processing', 'completed', 'cancelled'] as const).map((s) => (
-                  <Pressable key={s} onPress={() => onUpdateStatus(order.id, s)} style={[styles.statusChip, order.status === s && styles.statusChipOn]}>
-                    <Text style={[styles.statusText, order.status === s && { color: colors.primary }]}>{STATUS[s].label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          ))
+        }
+        renderItem={({ item: order }) => (
+          <OrderCard order={order} onUpdateStatus={onUpdateStatus} onDeleteOrder={onDeleteOrder} />
         )}
-      </ScrollView>
+      />
       <KeyboardSheet visible={open} onClose={() => setOpen(false)}>
         <Text style={styles.h1}>New order</Text>
         <Input placeholder="Customer name" value={form.customerName} onChangeText={(v) => setForm({ ...form, customerName: v })} />

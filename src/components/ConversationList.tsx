@@ -180,6 +180,10 @@ export function ConversationList({
         <FlatList
           data={visibleContacts}
           keyExtractor={(item) => item.id}
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
           onEndReached={() => hasMore && onLoadMore?.()}
           onEndReachedThreshold={0.4}
           ListFooterComponent={

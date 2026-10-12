@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
+import { parsePasswordResetLink, type PasswordResetLink } from '../lib/passwordResetLink';
 import { AuthScreen } from '../screens/AuthScreen';
+import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { MainScreen } from '../screens/MainScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -13,11 +15,32 @@ export function RootNavigator() {
   const { user, tenantId, isSuperAdmin, isActingAs, loading } = useAuth();
   const [page, setPage] = useState<'app' | 'settings' | 'account'>('app');
   const [settingsFocus, setSettingsFocus] = useState<'billing' | null>(null);
+  const [resetLink, setResetLink] = useState<PasswordResetLink | null>(null);
+
+  useEffect(() => {
+    const apply = (url: string | null) => {
+      const parsed = parsePasswordResetLink(url);
+      if (parsed) setResetLink(parsed);
+    };
+    Linking.getInitialURL().then(apply).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => apply(url));
+    return () => sub.remove();
+  }, []);
 
   const openSettings = (focus?: 'billing') => {
     setSettingsFocus(focus ?? null);
     setPage('settings');
   };
+
+  if (resetLink) {
+    return (
+      <ResetPasswordScreen
+        key={resetLink.rt || resetLink.tokenHash || resetLink.code || 'reset'}
+        link={resetLink}
+        onDone={() => setResetLink(null)}
+      />
+    );
+  }
 
   if (loading) {
     return (

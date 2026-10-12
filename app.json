@@ -14,7 +14,8 @@
         "NSPhotoLibraryUsageDescription": "Jawabify uses your photo library to send images in chats.",
         "NSMicrophoneUsageDescription": "Jawabify uses the microphone to record voice messages.",
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "associatedDomains": ["applinks:app.jawabify.com"]
     },
     "android": {
       "adaptiveIcon": {
@@ -46,6 +47,18 @@
           "data": [
             {
               "scheme": "jawabify"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.jawabify.com",
+              "pathPrefix": "/reset-password"
             }
           ]
         }

@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import { Button, Input } from '../components/ui';
 import { colors } from '../theme';
-import { WEB_ORIGIN } from '../config';
+import { APP_ORIGIN, WEB_ORIGIN } from '../config';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { KeyboardForm } from '../components/KeyboardSheet';
 import { BillingCard } from '../components/settings/BillingCard';
@@ -148,7 +148,7 @@ export function AccountScreen({ onBack }: { onBack: () => void }) {
           icon={<Mail size={14} color={colors.foreground} />}
           onPress={async () => {
             if (!user?.email) return;
-            const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: `${WEB_ORIGIN}/reset-password` });
+            const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: `${APP_ORIGIN}/reset-password` });
             if (error) toast.error(error.message);
             else toast.success('Password reset link sent');
           }}

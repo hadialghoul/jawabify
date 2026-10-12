@@ -243,6 +243,11 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
               <Text style={styles.sub}>{subscription.shop_domain}</Text>
             </View>
           ) : null}
+          {isShopify ? (
+            <Text style={styles.sub}>
+              This subscription is billed through Shopify. Cancelling here stops future charges and keeps your access until the end of the paid period. Payment details and invoices live in your Shopify admin under Settings → Apps and sales channels.
+            </Text>
+          ) : null}
           <Text style={styles.sub}>
             {status === 'trialing' ? 'Trial ends' : willCancel ? 'Access until' : 'Next charge'}: {formatDate(periodEnd)}
           </Text>
@@ -278,10 +283,16 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
               variant="destructive"
               loading={cancelling}
               onPress={() =>
-                Alert.alert('Cancel your subscription?', `Your plan stays active until ${formatDate(periodEnd)}.`, [
-                  { text: 'Keep plan', style: 'cancel' },
-                  { text: 'Cancel plan', style: 'destructive', onPress: cancelPlan },
-                ])
+                Alert.alert(
+                  'Cancel your subscription?',
+                  isShopify
+                    ? `Your plan stays active until ${formatDate(periodEnd)} — Shopify won't charge you again after that.`
+                    : `Your plan stays active until ${formatDate(periodEnd)}.`,
+                  [
+                    { text: 'Keep plan', style: 'cancel' },
+                    { text: 'Cancel plan', style: 'destructive', onPress: cancelPlan },
+                  ],
+                )
               }
             />
           ) : null}

@@ -25,6 +25,7 @@ import {
   UserRound,
   Users,
   Eye,
+  KeyRound,
   Trash2,
 } from 'lucide-react-native';
 import { format, startOfDay, eachDayOfInterval, subDays } from 'date-fns';
@@ -45,6 +46,7 @@ import { SuperAdminLeadsPanel } from '../components/superadmin/LeadsPanel';
 import { SuperAdminCampaigns } from '../components/superadmin/SuperAdminCampaigns';
 import { KeyboardSheet } from '../components/KeyboardSheet';
 import { invalidateCache } from '../lib/dataCache';
+import { invokeErrorMessage } from '../lib/functionError';
 
 type AdminView =
   | 'analytics'
@@ -128,6 +130,9 @@ export function SuperAdminScreen({
   const [confirmName, setConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [userTags, setUserTags] = useState<Record<string, UserLeadStatus>>({});
+  const [passwordEmail, setPasswordEmail] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [settingPassword, setSettingPassword] = useState(false);
 
   const loadOverview = async () => {
     setLoading(true);
@@ -496,6 +501,17 @@ export function SuperAdminScreen({
                     disabled={!r.tenant}
                     onPress={() => manage(r.tenant?.id ?? null, r.tenant?.name ?? r.email ?? 'Account')}
                   />
+                  {r.email ? (
+                    <Button
+                      title="Password"
+                      variant="outline"
+                      icon={<KeyRound size={14} color={colors.foreground} />}
+                      onPress={() => {
+                        setNewPassword('');
+                        setPasswordEmail(r.email);
+                      }}
+                    />
+                  ) : null}
                   {r.tenant ? (
                     <Button
                       title="Delete user"
@@ -597,6 +613,52 @@ export function SuperAdminScreen({
           loading={deleting}
           disabled={confirmName.trim() !== deleteTarget?.name}
           onPress={confirmDelete}
+        />
+      </KeyboardSheet>
+      <KeyboardSheet
+        visible={!!passwordEmail}
+        onClose={() => {
+          if (!settingPassword) {
+            setPasswordEmail(null);
+            setNewPassword('');
+          }
+        }}
+      >
+        <Text style={styles.name}>Set a new password for {passwordEmail}</Text>
+        <Text style={styles.meta}>
+          The account can sign in with this password straight away. Any other device still using the old password will be asked to sign in again.
+        </Text>
+        <Input
+          placeholder="At least 8 characters"
+          autoCapitalize="none"
+          autoComplete="new-password"
+          value={newPassword}
+          onChangeText={setNewPassword}
+        />
+        <Text style={styles.meta}>Share it with the account holder, or change it later from their own account page.</Text>
+        <Button
+          title={settingPassword ? 'Saving…' : 'Set password'}
+          loading={settingPassword}
+          disabled={newPassword.trim().length < 8}
+          onPress={async () => {
+            if (!passwordEmail) return;
+            setSettingPassword(true);
+            try {
+              const { data, error } = await supabase.functions.invoke('admin-reset-password', {
+                body: { email: passwordEmail, password: newPassword },
+              });
+              if (error || (data as { error?: string })?.error) {
+                throw new Error(await invokeErrorMessage(error, data));
+              }
+              toast.success(`New password set for ${passwordEmail}`);
+              setPasswordEmail(null);
+              setNewPassword('');
+            } catch (err: any) {
+              toast.error(err?.message ?? 'Could not set the new password');
+            } finally {
+              setSettingPassword(false);
+            }
+          }}
         />
       </KeyboardSheet>
     </View>

@@ -13,6 +13,17 @@ export function useOrders() {
   const [orders, setOrders] = useCachedState<Order[]>(cacheKey, []);
   const [loading, setLoading] = useState(() => !hasCache(cacheKey));
 
+  const dedupe = (rows: Order[]) => {
+    const seen = new Set<string>();
+    const unique: Order[] = [];
+    for (const row of rows) {
+      if (!row.id || seen.has(row.id)) continue;
+      seen.add(row.id);
+      unique.push(row);
+    }
+    return unique;
+  };
+
   const mapRow = (order: any): Order => ({
     id: order.id,
     displayId: order.display_id,
@@ -45,7 +56,7 @@ export function useOrders() {
     try {
       const { data, error } = await supabase.from('orders').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
-      setOrders((data || []).map(mapRow));
+      setOrders(dedupe((data || []).map(mapRow)));
     } catch {
       toast.error('Failed to load orders');
     } finally {
@@ -83,7 +94,7 @@ export function useOrders() {
           .invoke('shopify-api', { body: { action: 'register_order', params: { order_id: data.id } }, headers: actingHeaders() })
           .catch(() => {});
         const newOrder = mapRow(data);
-        setOrders((prev) => [newOrder, ...prev]);
+        setOrders((prev) => dedupe([newOrder, ...prev]));
         toast.success('Order created successfully');
         return newOrder;
       } catch {
@@ -125,11 +136,11 @@ export function useOrders() {
   useEffect(() => {
     fetchOrders();
     const channel = supabase
-      .channel('orders-changes-mobile')
+      .channel(`orders-changes-mobile-${tenantId}-${Date.now()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
         if ((payload.new as any)?.tenant_id !== tenantId) return;
         const row = mapRow(payload.new);
-        setOrders((prev) => (prev.some((o) => o.id === row.id) ? prev : [row, ...prev]));
+        setOrders((prev) => dedupe([row, ...prev]));
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
         if ((payload.new as any)?.tenant_id !== tenantId) return;
