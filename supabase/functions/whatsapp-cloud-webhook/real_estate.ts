@@ -1,4 +1,5 @@
 import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
+import { aiChat, aiFallbackReply } from "./ai-reply.ts";
 // Real estate vertical flow — isolated from e-commerce and restaurant.
 // Only invoked when tenant.vertical === 'real_estate'. Writes go ONLY to
 // listings/leads/viewings/agents (all guarded by guard_real_estate_only trigger).
@@ -420,12 +421,8 @@ export async function runRealEstateFlow(opts: {
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "google/gemini-3.8-flash", messages, tools: TOOLS, tool_choice: "auto" }),
-    });
-    if (!res.ok) { console.error("real_estate AI error", res.status, await res.text()); break; }
+    const res = await aiChat({ model: "google/gemini-3.8-flash", messages, tools: TOOLS, tool_choice: "auto" }, "real_estate", LOVABLE_API_KEY);
+    if (!res) break;
     const data = await res.json();
     const msg = data.choices?.[0]?.message;
     if (!msg) break;
@@ -447,7 +444,7 @@ export async function runRealEstateFlow(opts: {
   // If the AI started the deterministic flow, it already sent the first prompt.
   if (ctx.flowStarted) return;
 
-  if (!finalReply) finalReply = "Sorry, can you say that again?";
+  if (!finalReply) finalReply = aiFallbackReply(history, opts.messageText || "");
 
   const ok = await sendText(tenantPhoneNumberId, tenantAccessToken, phoneNumber, finalReply);
   await supabase.from("messages").insert({

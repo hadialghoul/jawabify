@@ -1,4 +1,5 @@
 import { getOnlinePaymentLink, onlinePaymentPrompt } from "./online-payment.ts";
+import { aiChat, aiFallbackReply } from "./ai-reply.ts";
 // Healthcare vertical flow — isolated from ecommerce/restaurant/real_estate/wellness.
 // Invoked only when tenant.vertical === 'healthcare'. Writes only to healthcare_*
 // tables (each guarded by guard_healthcare_only trigger).
@@ -282,12 +283,8 @@ export async function runHealthcareFlow(opts: {
   let finalReply = "";
 
   for (let turn = 0; turn < 5; turn++) {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "google/gemini-3.8-flash", messages, tools: TOOLS, tool_choice: "auto" }),
-    });
-    if (!res.ok) { console.error("healthcare AI error", res.status, await res.text()); break; }
+    const res = await aiChat({ model: "google/gemini-3.8-flash", messages, tools: TOOLS, tool_choice: "auto" }, "healthcare", LOVABLE_API_KEY);
+    if (!res) break;
     const data = await res.json();
     const msg = data.choices?.[0]?.message;
     if (!msg) break;
@@ -308,7 +305,7 @@ export async function runHealthcareFlow(opts: {
   // If the AI started the deterministic flow, it already sent the first prompt.
   if (ctx.flowStarted) return;
 
-  if (!finalReply) finalReply = "Sorry, can you say that again?";
+  if (!finalReply) finalReply = aiFallbackReply(history, opts.messageText || "");
   const ok = await sendText(tenantPhoneNumberId, tenantAccessToken, phoneNumber, finalReply);
   await supabase.from("messages").insert({
     contact_id: contact.id, content: finalReply, direction: "outgoing", status: ok ? "sent" : "failed",
