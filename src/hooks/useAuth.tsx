@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { unregisterPushToken } from '../lib/pushNotifications';
 import { supabase } from '../lib/supabase';
 import { invalidateCache } from '../lib/dataCache';
 import {
@@ -164,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    await unregisterPushToken();
     await supabase.auth.signOut();
     invalidateCache();
     await persistActing(null);

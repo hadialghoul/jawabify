@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GraduationCap, Settings, UserRound } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +37,7 @@ import { useSubscription } from '../hooks/useSubscription';
 import { Button, Input } from '../components/ui';
 import { colors } from '../theme';
 import { WEB_ORIGIN, APP_ORIGIN } from '../config';
+import { subscribeNotificationChats } from '../lib/pushNotifications';
 
 export function MainScreen({
   onOpenSettings,
@@ -72,6 +73,7 @@ export function MainScreen({
     clearChatMessages,
     toggleBlocked,
     updateContact,
+    openContactById,
   } = useMessages();
   const { orders, createOrder, updateOrderStatus, deleteOrder, fetchOrders } = useOrders();
   const { vertical } = useTenantVertical();
@@ -114,6 +116,17 @@ export function MainScreen({
     fetchMessages(contact.id);
     setActiveTab('chats');
   };
+
+  const openContactRef = useRef(openContactById);
+  const selectContactRef = useRef(handleSelectContact);
+  openContactRef.current = openContactById;
+  selectContactRef.current = handleSelectContact;
+  useEffect(() => {
+    return subscribeNotificationChats(async (contactId) => {
+      const contact = await openContactRef.current(contactId);
+      if (contact) selectContactRef.current(contact);
+    });
+  }, []);
 
   const pendingOrdersCount = useMemo(() => orders.filter((o) => o.status === 'pending').length, [orders]);
   const interestedCount = useMemo(() => contacts.filter((c) => c.isInterested).length, [contacts]);

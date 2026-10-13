@@ -1,3 +1,4 @@
+import './src/lib/pushNotifications';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
@@ -5,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './src/hooks/useAuth';
 import { ToastProvider } from './src/hooks/useToast';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { PushNotificationHost } from './src/components/PushNotificationHost';
 import { WhatsAppConnectHost } from './src/components/WhatsAppConnectHost';
 import { StripeCheckoutHost } from './src/components/StripeCheckoutHost';
 
@@ -22,6 +24,7 @@ export default function App() {
           <ToastProvider>
             <AuthProvider>
               <RootNavigator />
+              <PushNotificationHost />
               <WhatsAppConnectHost />
               <StripeCheckoutHost />
               <StatusBar style="light" />

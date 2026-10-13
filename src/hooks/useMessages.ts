@@ -6,6 +6,7 @@ import { useAuth } from './useAuth';
 import { actingHeaders } from '../lib/actingTenant';
 import { mediaPlaceholder } from '../lib/chatMedia';
 import { invokeErrorMessage } from '../lib/functionError';
+import { notifyIncomingWhileOpen } from '../lib/pushNotifications';
 import { enqueueSend, mediaStoragePath, uniqueToken, withRetry } from '../lib/sendQueue';
 import { useToast } from './useToast';
 
@@ -515,9 +516,24 @@ export function useMessages() {
   }, [fetchContacts, tenantId]);
 
   const fetchContactsRef = useRef(fetchContacts);
+  const contactsRef = useRef(contacts);
   useEffect(() => {
     fetchContactsRef.current = fetchContacts;
   }, [fetchContacts]);
+  useEffect(() => {
+    contactsRef.current = contacts;
+  }, [contacts]);
+
+  const openContactById = useCallback(async (contactId: string): Promise<Contact | null> => {
+    const existing = contactsRef.current.find((c) => c.id === contactId);
+    if (existing) return existing;
+    const { data } = await supabase.from('contacts').select(CONTACT_COLUMNS).eq('id', contactId).maybeSingle();
+    if (!data) return null;
+    const [mapped] = await enrichContactsWithPreviews([data], [contactId]);
+    if (!mapped) return null;
+    setContacts((prev) => (prev.some((c) => c.id === contactId) ? prev : [mapped, ...prev]));
+    return mapped;
+  }, [enrichContactsWithPreviews]);
 
   useEffect(() => {
     const channelId = `${Date.now()}-${Math.random()}`;
@@ -541,6 +557,13 @@ export function useMessages() {
           return { ...prev, [newMsg.contact_id]: [...contactMessages, message] };
         });
         if (newMsg.direction === 'incoming') {
+          const known = contactsRef.current.find((c) => c.id === newMsg.contact_id);
+          void notifyIncomingWhileOpen({
+            contactId: newMsg.contact_id,
+            content: newMsg.content,
+            mediaType: newMsg.media_type,
+            name: known?.name,
+          });
           setContacts((prev) => {
             const contactIndex = prev.findIndex((c) => c.id === newMsg.contact_id);
             if (contactIndex === -1) {
@@ -593,6 +616,15 @@ export function useMessages() {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, (payload) => {
         const updated = payload.new as any;
+        const previous = payload.old as any;
+        if (updated.needs_human === true && previous?.needs_human !== true) {
+          const name = updated.name || updated.handle || updated.phone_number;
+          void notifyIncomingWhileOpen({
+            contactId: updated.id,
+            content: name ? `${name} needs a human` : 'A chat needs a human',
+            name: 'Jawabify',
+          });
+        }
         setContacts((prev) =>
           prev.map((c) =>
             c.id === updated.id
@@ -636,6 +668,7 @@ export function useMessages() {
     sendMessage,
     createContact,
     fetchMessages,
+    openContactById,
     loadMoreMessages,
     deleteChat,
     updateContact,
