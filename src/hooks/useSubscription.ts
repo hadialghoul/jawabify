@@ -13,6 +13,7 @@ export interface SubscriptionRecord {
   shopify_subscription_id?: string | null;
   shop_domain?: string | null;
   environment?: string | null;
+  user_id?: string | null;
 }
 
 
@@ -37,33 +38,36 @@ function isRecordActive(s: SubscriptionRecord): boolean {
 }
 
 export function useSubscription() {
-  const { user, tenantId, isSuperAdmin } = useAuth();
+  const { user, tenantId, isActingAs } = useAuth();
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
-  const [plan, setPlan] = useState<'starter' | 'growth' | null>(isSuperAdmin ? 'growth' : null);
+  const [plan, setPlan] = useState<'starter' | 'growth' | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchSub = async () => {
-    if (!user?.id) {
+    if (!user?.id && !tenantId) {
       setSubscription(null);
+      setLoading(false);
+      return;
+    }
+    const live = (rows: SubscriptionRecord[] | null | undefined) =>
+      (rows ?? []).filter((s) => s.environment === 'live');
+    if (tenantId) {
+      const { data: rows } = await supabase.rpc('get_tenant_subscription', { p_tenant_id: tenantId });
+      const list = live(rows as SubscriptionRecord[] | null).filter(
+        (row) => !(isActingAs && user?.id && row.user_id === user.id),
+      );
+      setSubscription(list.find(isRecordActive) ?? list[0] ?? null);
       setLoading(false);
       return;
     }
     const { data } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', user!.id)
       .order('created_at', { ascending: false })
       .limit(20);
-    const live = (rows: SubscriptionRecord[] | null | undefined) =>
-      (rows ?? []).filter((s) => s.environment === 'live');
     const ownRows = live(data as SubscriptionRecord[] | null);
-    let own = ownRows.find(isRecordActive) ?? null;
-    if (!own && tenantId) {
-      const { data: rows } = await supabase.rpc('get_tenant_subscription', { p_tenant_id: tenantId });
-      const list = live(rows as SubscriptionRecord[] | null);
-      own = list.find(isRecordActive) ?? null;
-    }
-    setSubscription(own);
+    setSubscription(ownRows.find(isRecordActive) ?? null);
     setLoading(false);
   };
 
@@ -72,35 +76,33 @@ export function useSubscription() {
   }, [user?.id, tenantId]);
 
   useEffect(() => {
-    if (isSuperAdmin) {
-      setPlan('growth');
-      return;
-    }
     if (!tenantId) {
-      setPlan('starter');
+      setPlan(null);
       return;
     }
     let cancelled = false;
     setPlan(null);
-    supabase.rpc('tenant_plan', { p_tenant_id: tenantId }).then(({ data, error }) => {
+    supabase.rpc('get_tenant_subscription', { p_tenant_id: tenantId }).then(({ data, error }) => {
       if (cancelled) return;
-      if (error) {
-        setPlan('starter');
-        return;
-      }
-      setPlan(data === 'growth' ? 'growth' : 'starter');
+      const rows = ((data as SubscriptionRecord[] | null) ?? []).filter((row) => {
+        if (row.environment && row.environment !== 'live') return false;
+        if (isActingAs && user?.id && row.user_id === user.id) return false;
+        return true;
+      });
+      const active = rows.find(isRecordActive) ?? null;
+      if (error) setPlan('starter');
+      else setPlan(isGrowthSubscription(active) ? 'growth' : 'starter');
     });
     return () => {
       cancelled = true;
     };
-  }, [tenantId, isSuperAdmin]);
+  }, [tenantId, isActingAs, user?.id]);
 
-  const priceSaysGrowth = isGrowthSubscription(subscription);
-  const isGrowth = isSuperAdmin || plan === 'growth' || (plan === null && priceSaysGrowth);
+  const isGrowth = plan === 'growth';
 
   return {
     subscription,
-    loading: loading || (plan === null && !isSuperAdmin),
+    loading: loading || (tenantId != null && plan === null),
     isActive: !!subscription && isRecordActive(subscription),
     isGrowth,
     refetch: fetchSub,

@@ -75,7 +75,7 @@ export function SettingsScreen({
   onBack: () => void;
   focusSection?: 'billing' | null;
 }) {
-  const { user, tenantId, isTenantAdmin, isSuperAdmin, actingTenantId, signOut } = useAuth();
+  const { user, tenantId, isTenantAdmin, isActingAs, actingTenantName, signOut } = useAuth();
   const { isGrowth } = useSubscription();
   const { vertical } = useTenantVertical();
   const scrollRef = useRef<ScrollView>(null);
@@ -217,7 +217,7 @@ export function SettingsScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Settings" onBack={onBack} />
+      <ScreenHeader title="Settings" subtitle={isActingAs ? actingTenantName || 'Account' : undefined} onBack={onBack} />
       <KeyboardForm contentStyle={styles.pad} scrollRef={scrollRef}>
           <View onLayout={(e) => { billingY.current = e.nativeEvent.layout.y; }}>
             <BillingCard highlight={focusSection === 'billing'} />
