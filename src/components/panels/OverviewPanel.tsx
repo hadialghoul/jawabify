@@ -16,6 +16,7 @@ import { format, subDays, startOfDay, endOfDay, startOfMonth } from 'date-fns';
 import { colors, radius } from '../../theme';
 import { useAnalytics, useTodayStats, type AnalyticsRange } from '../../hooks/useAppData';
 import { AreaLineChart, BarChartView, ChartCard, ChartLegend, CHART_COLORS, DonutChart, HorizontalBarChart } from '../charts';
+import { ConversationSourcesCard } from '../crm/ConversationSourcesCard';
 
 const STATUS_COLORS: Record<string, string> = {
   completed: '#059669',
@@ -130,6 +131,8 @@ export function OverviewPanel({
           <Stat label="Cancelled" value={today?.cancelledOrders ?? 0} icon={<XCircle size={16} color={colors.destructive} />} />
         </View>
       </View>
+
+      <ConversationSourcesCard />
 
       <View style={styles.grid}>
         <Stat label="Contacts" value={data?.totals.contacts ?? 0} icon={<Users size={16} color={colors.primary} />} />

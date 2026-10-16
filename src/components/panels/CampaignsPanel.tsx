@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { FileText, Megaphone, Plus, RefreshCw, Send, Trash2 } from 'lucide-react-native';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../lib/supabase';
+import { invokeErrorMessage } from '../../lib/functionError';
+import { importCampaignBuffer, normalizePhone, parsePastedNumbers, splitKnownContacts } from '../../lib/jawabifyOctUpdates';
 import { useAuth } from '../../hooks/useAuth';
 import { actingHeaders } from '../../lib/actingTenant';
 import { useToast } from '../../hooks/useToast';
@@ -81,6 +85,10 @@ export function CampaignsPanel({
   const [tplHeader, setTplHeader] = useState('');
   const [tplFooter, setTplFooter] = useState('');
   const [creatingTpl, setCreatingTpl] = useState(false);
+  const [numberText, setNumberText] = useState('');
+  const [extraPhones, setExtraPhones] = useState<string[]>([]);
+  const [extraNames, setExtraNames] = useState<string[]>([]);
+  const [importNote, setImportNote] = useState('');
 
   const loadCampaigns = useCallback(async () => {
     if (!tenantId) {
@@ -126,14 +134,84 @@ export function CampaignsPanel({
     return true;
   });
 
+  const addPastedNumbers = () => {
+    const parsed = parsePastedNumbers(numberText);
+    if (parsed.phones.length === 0) {
+      toast.error(parsed.skipped ? 'No valid numbers found' : 'Paste one or more phone numbers');
+      return;
+    }
+    setExtraPhones((prev) => {
+      const names = [...extraNames];
+      const next = [...prev];
+      for (const phone of parsed.phones) {
+        if (next.includes(phone)) continue;
+        next.push(phone);
+        names.push('');
+      }
+      setExtraNames(names.slice(0, next.length));
+      return next;
+    });
+    setNumberText('');
+    if (parsed.skipped) toast.success(`Added ${parsed.phones.length} · skipped ${parsed.skipped} invalid/duplicate`);
+  };
+
+  const importNumbers = async () => {
+    const picked = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      type: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/csv',
+        'text/comma-separated-values',
+        'application/vnd.oasis.opendocument.spreadsheet',
+      ],
+    });
+    if (picked.canceled || !picked.assets?.[0]) return;
+    try {
+      const base64 = await FileSystem.readAsStringAsync(picked.assets[0].uri, { encoding: FileSystem.EncodingType.Base64 });
+      const binary = globalThis.atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const imported = importCampaignBuffer(bytes.buffer);
+      setExtraPhones((prev) => {
+        const names = [...extraNames];
+        const next = [...prev];
+        imported.phones.forEach((phone, index) => {
+          if (next.includes(phone)) return;
+          next.push(phone);
+          names.push(imported.names[index] || '');
+        });
+        setExtraNames(names.slice(0, next.length));
+        return next;
+      });
+      setImportNote(imported.summary);
+      toast.success(imported.summary);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not import the file');
+    }
+  };
+
+  const removeExtra = (phone: string) => {
+    const index = extraPhones.indexOf(phone);
+    setExtraPhones((prev) => prev.filter((item) => item !== phone));
+    if (index >= 0) setExtraNames((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const createCampaign = async () => {
-    if (!name.trim() || !templateName || recipients.length === 0) {
+    const known = splitKnownContacts(
+      extraPhones,
+      extraNames,
+      waContacts.map((contact) => ({ id: contact.id, phone: contact.phoneNumber })),
+    );
+    const contactIds = [...new Set([...recipients.map((contact) => contact.id), ...known.contactIds])];
+    if (!name.trim() || !templateName || (contactIds.length === 0 && known.manualPhones.length === 0)) {
       toast.error('Name, template, and at least one contact required');
       return;
     }
     setSending(true);
     try {
-        const templateBody = selectedTemplate?.components?.find((c: any) => String(c.type).toUpperCase() === 'BODY')?.text || '';
+      const templateBody = selectedTemplate?.components?.find((c: any) => String(c.type).toUpperCase() === 'BODY')?.text || '';
+      const selectedContacts = waContacts.filter((contact) => contactIds.includes(contact.id));
       const res = await supabase.functions.invoke('send-campaign', {
         headers: requestHeaders(),
         body: {
@@ -143,8 +221,10 @@ export function CampaignsPanel({
           templateBody,
           variables: [],
           variableFallbacks: [],
-          contactIds: recipients.map((c) => c.id),
-          contactPhones: recipients.map((c) => c.phoneNumber),
+          contactIds,
+          contactPhones: selectedContacts.map((contact) => contact.phoneNumber),
+          manualPhones: known.manualPhones,
+          manualNames: known.manualNames,
           scheduledAt: null,
           sendRatePerMinute: 60,
           concurrency: 5,
@@ -153,12 +233,14 @@ export function CampaignsPanel({
           optOutVariableIndex: null,
         },
       });
-      if (res.error) throw new Error(res.error.message);
-      if (res.data?.error) throw new Error(res.data.error);
-      toast.success(`Campaign started: sending to ${recipients.length} contacts`);
+      if (res.error || res.data?.error) throw new Error(await invokeErrorMessage(res.error, res.data));
+      toast.success(`Campaign started: sending to ${contactIds.length + known.manualPhones.length} contacts`);
       setShowCreate(false);
       setName('');
       setTemplateName('');
+      setExtraPhones([]);
+      setExtraNames([]);
+      setImportNote('');
       await loadCampaigns();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to send');
@@ -352,6 +434,28 @@ export function CampaignsPanel({
           <Button title={`Flagged (${waContacts.filter((c) => c.needsHuman).length})`} variant={audience === 'flagged' ? 'primary' : 'outline'} onPress={() => setAudience('flagged')} />
         </View>
         <Text style={styles.meta}>{recipients.length} recipients selected</Text>
+        <Text style={styles.sub}>Add numbers</Text>
+        <Input
+          placeholder="Paste numbers, separated by commas or new lines"
+          value={numberText}
+          onChangeText={setNumberText}
+          multiline
+          style={{ minHeight: 72, textAlignVertical: 'top' }}
+        />
+        <Button title="Add numbers" variant="outline" onPress={addPastedNumbers} />
+        <Button title="Import Excel" variant="outline" onPress={importNumbers} />
+        {importNote ? <Text style={styles.meta}>{importNote}</Text> : null}
+        <View style={styles.row}>
+          {extraPhones.map((phone) => {
+            const known = waContacts.find((contact) => normalizePhone(contact.phoneNumber) === phone);
+            const label = known?.name || phone;
+            return (
+              <Pressable key={phone} onPress={() => removeExtra(phone)} style={styles.chip}>
+                <Text style={[styles.meta, /[\u0600-\u06FF]/.test(label) && { writingDirection: 'rtl', textAlign: 'right' }]}>{label} ×</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <Button title={sending ? 'Sending…' : 'Send campaign'} loading={sending} onPress={createCampaign} />
       </KeyboardSheet>
 
@@ -390,4 +494,5 @@ const styles = StyleSheet.create({
   name: { fontWeight: '700', color: colors.foreground },
   meta: { fontSize: 12, color: colors.mutedForeground },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  chip: { backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: 8, paddingVertical: 4 },
 });

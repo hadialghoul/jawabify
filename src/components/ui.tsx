@@ -97,7 +97,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.card,
     paddingHorizontal: 12,
-    fontSize: 15,
+    fontSize: 16,
+    writingDirection: 'auto',
     color: colors.foreground,
   },
   card: {

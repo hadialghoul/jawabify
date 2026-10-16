@@ -79,9 +79,9 @@ export function MainScreen({
   const { vertical } = useTenantVertical();
   const isService = vertical === 'service';
   const isRestaurant = vertical === 'restaurant';
-  const { isGrowth } = useSubscription();
-  // CRM + Campaigns stay behind Growth for service and restaurant, same as the website.
-  const needsGrowthForCrm = (isService || isRestaurant) && !isGrowth;
+  const { isGrowth, loading: subscriptionLoading } = useSubscription();
+  // CRM, Campaigns, and advanced sales AI stay on the Growth plan for every account.
+  const needsGrowthForCrm = !subscriptionLoading && !isGrowth;
   const { channel, setChannel } = useChannelFilter();
 
   // When vertical flips (e.g. Service → Restaurant), leave any stale service tab.

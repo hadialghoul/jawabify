@@ -5,6 +5,8 @@ import type { Contact } from '../../types';
 import { KeyboardSheet } from '../KeyboardSheet';
 import { Button, Input } from '../ui';
 import { colors, radius } from '../../theme';
+import { ContactSourceCard } from './ContactSourceCard';
+import { CustomerInsightsCard } from './CustomerInsightsCard';
 
 export type ClientEdits = {
   name: string;
@@ -98,6 +100,8 @@ export function EditClientSheet({
         </View>
         <Button title="Add" variant="outline" onPress={addTag} />
       </View>
+      {contact ? <ContactSourceCard contactId={contact.id} /> : null}
+      {contact ? <CustomerInsightsCard contactId={contact.id} /> : null}
       <Button title={saving ? 'Saving…' : 'Save'} onPress={handleSave} disabled={saving} />
       <Button title="Cancel" variant="ghost" onPress={onClose} />
     </KeyboardSheet>

@@ -130,9 +130,12 @@ export function OrdersPanel({
         }
         ({ data, error } = await invokeSync());
       }
-      if (error) throw new Error(await invokeErrorMessage(error, data));
+      if (error || data?.error) throw new Error(await invokeErrorMessage(error, data));
       await onSynced?.();
-      toast.success(`Synced: +${data?.inserted ?? 0} new, ${data?.updated ?? 0} updated`);
+      const found = data?.found ?? 0;
+      const created = data?.inserted ?? data?.created ?? 0;
+      const updated = data?.updated ?? 0;
+      toast.success(`Found ${found} · New ${created} · Updated ${updated}`);
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       supabase.functions

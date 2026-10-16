@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { useSubscription } from '../../hooks/useSubscription';
 import { useToast } from '../../hooks/useToast';
 import { Button, Card, Input } from '../ui';
 import { colors } from '../../theme';
@@ -25,6 +26,7 @@ const DEFAULT_HOURS: Hours = Object.fromEntries(
 
 export function RestaurantBusinessSettings() {
   const { tenantId } = useAuth();
+  const { isGrowth } = useSubscription();
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [fee, setFee] = useState('0');
@@ -111,6 +113,12 @@ export function RestaurantBusinessSettings() {
 
   const toggleUpsell = async (v: boolean) => {
     if (!tenantId) return;
+    if (v && !isGrowth) {
+      setUpsell(false);
+      toast.error('Advanced AI for sales is available on the Growth plan.');
+      return;
+    }
+    const previous = upsell;
     setUpsell(v);
     const { error } = await supabase.from('app_settings').upsert(
       [
@@ -119,8 +127,12 @@ export function RestaurantBusinessSettings() {
       ],
       { onConflict: 'tenant_id,key' },
     );
-    if (error) toast.error(error.message);
-    else toast.success(v ? 'Upsell enabled' : 'Upsell disabled');
+    if (error) {
+      setUpsell(previous);
+      toast.error(error.message || 'Could not update advanced AI');
+      return;
+    }
+    toast.success(v ? 'Advanced AI for sales is ON' : 'Advanced AI for sales is OFF');
   };
 
   if (loading) {
@@ -145,7 +157,9 @@ export function RestaurantBusinessSettings() {
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>AI upsell</Text>
-            <Text style={styles.sub}>Suggests one extra item once per order.</Text>
+            <Text style={styles.sub}>
+              The AI recommends products, handles price objections, and sends one friendly follow-up 2 hours after a customer shows interest or leaves an order unfinished.
+            </Text>
           </View>
           <Switch value={upsell} onValueChange={toggleUpsell} trackColor={{ true: colors.primary }} />
         </View>

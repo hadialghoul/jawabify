@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Image as RNImage, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Image as RNImage, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -19,6 +20,7 @@ import { InstagramPagePicker } from '../components/InstagramPagePicker';
 import { useInstagramFacebookConnect } from '../hooks/useInstagramFacebookConnect';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useSubscription } from '../hooks/useSubscription';
 import { useToast } from '../hooks/useToast';
 import { actingHeaders } from '../lib/actingTenant';
 import { invokeErrorMessage } from '../lib/functionError';
@@ -28,6 +30,8 @@ import { Button, Card, Input } from '../components/ui';
 import { colors, radius } from '../theme';
 import { APP_ORIGIN, WEB_ORIGIN } from '../config';
 import { connectWhatsApp } from '../lib/whatsappConnect';
+import { connectShopify } from '../lib/jawabifyOctUpdates';
+import { CommerceCatalogCard } from '../components/settings/CommerceCatalogCard';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { KeyboardForm } from '../components/KeyboardSheet';
 import { BillingCard } from '../components/settings/BillingCard';
@@ -72,6 +76,7 @@ export function SettingsScreen({
   focusSection?: 'billing' | null;
 }) {
   const { user, tenantId, isTenantAdmin, isSuperAdmin, actingTenantId, signOut } = useAuth();
+  const { isGrowth } = useSubscription();
   const { vertical } = useTenantVertical();
   const scrollRef = useRef<ScrollView>(null);
   const billingY = useRef(0);
@@ -103,11 +108,13 @@ export function SettingsScreen({
   const [waConnected, setWaConnected] = useState(false);
   const [waPhone, setWaPhone] = useState('');
   const [shopDomain, setShopDomain] = useState('');
-  const [shopifyToken, setShopifyToken] = useState('');
+  const [shopClientId, setShopClientId] = useState('');
+  const [shopSecret, setShopSecret] = useState('');
+  const [shopApprovalUrl, setShopApprovalUrl] = useState<string | null>(null);
+  const [showShopifyAdvanced, setShowShopifyAdvanced] = useState(false);
   const [shopifyConnected, setShopifyConnected] = useState(false);
   const [shopifyConnecting, setShopifyConnecting] = useState(false);
   const [shopifyImporting, setShopifyImporting] = useState(false);
-  const [showTokenConnect, setShowTokenConnect] = useState(false);
   const [knowledgeImages, setKnowledgeImages] = useState<KnowledgeImage[]>([]);
   const [newImageLabel, setNewImageLabel] = useState('');
   const [newImageDesc, setNewImageDesc] = useState('');
@@ -257,14 +264,35 @@ export function SettingsScreen({
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.label}>AI upselling & recommendations</Text>
-                <Text style={styles.sub}>Suggest one relevant add-on. Never pushy — one suggestion max.</Text>
+                <Text style={styles.sub}>
+                  The AI recommends products, handles price objections, and sends ONE friendly follow-up 2 hours after a customer shows interest or leaves an order unfinished (within WhatsApp's 24h window).
+                  {!isGrowth ? ' Available on the Growth plan.' : ''}
+                </Text>
               </View>
               <Switch
                 value={aiUpsellEnabled}
                 onValueChange={async (v) => {
+                  if (v && !isGrowth) {
+                    setAiUpsellEnabled(false);
+                    toast.error('Advanced AI for sales is available on the Growth plan.');
+                    return;
+                  }
+                  if (!tenantId) return;
+                  const previous = aiUpsellEnabled;
                   setAiUpsellEnabled(v);
-                  await upsertSetting('ai_upsell_enabled', v);
-                  toast.success(v ? 'Upselling is ON' : 'Upselling is OFF');
+                  const { error } = await supabase.from('app_settings').upsert(
+                    [
+                      { tenant_id: tenantId, key: 'ai_upsell_enabled', value: v },
+                      { tenant_id: tenantId, key: 'restaurant_upsell_enabled', value: v },
+                    ] as any,
+                    { onConflict: 'tenant_id,key' },
+                  );
+                  if (error) {
+                    setAiUpsellEnabled(previous);
+                    toast.error(error.message || 'Could not update advanced AI');
+                    return;
+                  }
+                  toast.success(v ? 'Advanced AI for sales is ON' : 'Advanced AI for sales is OFF');
                 }}
                 trackColor={{ true: colors.primary }}
               />
@@ -449,42 +477,70 @@ export function SettingsScreen({
                     }
                   }}
                 />
-                <Button title={showTokenConnect ? 'Hide access token' : 'Connect with Admin API token'} variant="ghost" onPress={() => setShowTokenConnect((v) => !v)} />
-                {showTokenConnect ? (
+                <Button
+                  title={showShopifyAdvanced ? 'Hide advanced' : 'Advanced'}
+                  variant="ghost"
+                  onPress={() => setShowShopifyAdvanced((v) => !v)}
+                />
+                {showShopifyAdvanced ? (
                   <>
-                    <Input placeholder="shpat_…" autoCapitalize="none" value={shopifyToken} onChangeText={setShopifyToken} />
+                    <Input placeholder="Client ID" autoCapitalize="none" value={shopClientId} onChangeText={setShopClientId} />
+                    <Input
+                      placeholder="Client Secret"
+                      autoCapitalize="none"
+                      secureTextEntry
+                      value={shopSecret}
+                      onChangeText={setShopSecret}
+                    />
                     <Button
-                      title="Connect with token"
+                      title="Connect"
                       variant="outline"
                       onPress={async () => {
-                        if (!shopDomain.trim() || !shopifyToken.trim()) {
-                          toast.error('Enter both the store domain and the Admin API access token.');
+                        if (!shopDomain.trim() || !shopSecret.trim()) {
+                          toast.error('Enter the store domain and client secret.');
                           return;
                         }
                         setShopifyConnecting(true);
+                        setShopApprovalUrl(null);
                         try {
-                          const { data, error } = await supabase.functions.invoke('shopify-connect-token', {
-                            headers: actingHeaders(),
-                            body: { shop: shopDomain.trim(), access_token: shopifyToken.trim() },
-                          });
-                          if (error) throw error;
-                          if (data?.error) throw new Error(data.error);
+                          const result = await connectShopify(shopDomain, shopClientId, shopSecret);
+                          setShopSecret('');
+                          setShopClientId('');
+                          if (result.kind === 'approval') {
+                            setShopApprovalUrl(result.url);
+                            return;
+                          }
                           setShopifyConnected(true);
-                          setShopifyToken('');
-                          toast.success(`Connected to ${data?.shop_name || data?.shop_domain}`);
+                          toast.success(`Connected to ${result.label}`);
                         } catch (e: any) {
-                          toast.error(e?.message || 'Failed to connect with that token.');
+                          toast.error(e?.message || 'Failed to connect Shopify.');
                         } finally {
                           setShopifyConnecting(false);
                         }
                       }}
                     />
+                    {shopApprovalUrl ? (
+                      <>
+                        <Text style={styles.sub}>Approve this store on Shopify, then come back and refresh.</Text>
+                        <Button title="Approve on Shopify" onPress={() => Linking.openURL(shopApprovalUrl)} />
+                        <Button
+                          title="Copy link"
+                          variant="outline"
+                          onPress={async () => {
+                            await Clipboard.setStringAsync(shopApprovalUrl);
+                            toast.success('Link copied');
+                          }}
+                        />
+                      </>
+                    ) : null}
                   </>
                 ) : null}
               </>
             )}
           </Card>
           ) : null}
+
+          <CommerceCatalogCard />
 
           <Card>
             <View style={styles.head}>

@@ -37,8 +37,9 @@ function isRecordActive(s: SubscriptionRecord): boolean {
 }
 
 export function useSubscription() {
-  const { user, tenantId } = useAuth();
+  const { user, tenantId, isSuperAdmin } = useAuth();
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
+  const [plan, setPlan] = useState<'starter' | 'growth' | null>(isSuperAdmin ? 'growth' : null);
   const [loading, setLoading] = useState(true);
 
   const fetchSub = async () => {
@@ -70,11 +71,38 @@ export function useSubscription() {
     fetchSub();
   }, [user?.id, tenantId]);
 
+  useEffect(() => {
+    if (isSuperAdmin) {
+      setPlan('growth');
+      return;
+    }
+    if (!tenantId) {
+      setPlan('starter');
+      return;
+    }
+    let cancelled = false;
+    setPlan(null);
+    supabase.rpc('tenant_plan', { p_tenant_id: tenantId }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        setPlan('starter');
+        return;
+      }
+      setPlan(data === 'growth' ? 'growth' : 'starter');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, isSuperAdmin]);
+
+  const priceSaysGrowth = isGrowthSubscription(subscription);
+  const isGrowth = isSuperAdmin || plan === 'growth' || (plan === null && priceSaysGrowth);
+
   return {
     subscription,
-    loading,
+    loading: loading || (plan === null && !isSuperAdmin),
     isActive: !!subscription && isRecordActive(subscription),
-    isGrowth: isGrowthSubscription(subscription),
+    isGrowth,
     refetch: fetchSub,
   };
 }

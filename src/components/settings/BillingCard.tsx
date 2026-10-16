@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Check, CreditCard, ShieldCheck, Store } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { invokeErrorMessage } from '../../lib/functionError';
@@ -15,6 +16,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useSubscription } from '../../hooks/useSubscription';
 import { useToast } from '../../hooks/useToast';
 import { Badge, Button, Card } from '../ui';
+import { renewSubscription } from '../../lib/jawabifyOctUpdates';
 import { colors, radius } from '../../theme';
 
 function formatDate(iso: string | null) {
@@ -39,20 +41,34 @@ const TRIAL_PERKS = [
 ] as const;
 
 export function BillingCard({ highlight = false }: { highlight?: boolean }) {
-  const { user, isTenantAdmin } = useAuth();
+  const { user, tenantId, isTenantAdmin } = useAuth();
   const { subscription, loading, isGrowth, refetch } = useSubscription();
   const toast = useToast();
   const [opening, setOpening] = useState(false);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [renewing, setRenewing] = useState(false);
+  const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
+  const [approvalPlan, setApprovalPlan] = useState('your plan');
+  const [shopifyOrigin, setShopifyOrigin] = useState(false);
   const [plan, setPlan] = useState<SubscribePlanKey>('starter');
   const status = subscription?.status ?? 'none';
-  const isShopify = subscription?.billing_provider === 'shopify';
+  const isShopify = shopifyOrigin || subscription?.billing_provider === 'shopify';
   const hasStripeCustomer = Boolean(subscription?.stripe_customer_id);
   const willCancel = subscription?.cancel_at_period_end;
   const periodEnd = subscription?.current_period_end ?? null;
   const canUpgradeToGrowth =
     !!subscription && ['active', 'trialing'].includes(status) && !isGrowth;
+
+  useEffect(() => {
+    if (!tenantId) return;
+    supabase
+      .from('tenants')
+      .select('billing_origin')
+      .eq('id', tenantId)
+      .maybeSingle()
+      .then(({ data }) => setShopifyOrigin((data as { billing_origin?: string } | null)?.billing_origin === 'shopify'));
+  }, [tenantId]);
 
   const selected = SUBSCRIBE_PLANS[plan];
   const continueLabel = `Continue with ${selected.label} — $${selected.price}/month`;
@@ -158,6 +174,25 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
     }
   };
 
+  const renewPlan = async () => {
+    setRenewing(true);
+    try {
+      const result = await renewSubscription('live');
+      if (result.kind === 'shopify_approval') {
+        setApprovalUrl(result.url);
+        setApprovalPlan(result.plan || 'your plan');
+        return;
+      }
+      setApprovalUrl(null);
+      toast.success('Your existing plan is renewed. Cancellation removed.');
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not renew the plan');
+    } finally {
+      setRenewing(false);
+    }
+  };
+
   const planLabel = isGrowth
     ? "Jawabify Growth \u00B7 $90/month"
     : "Jawabify Starter \u00B7 $45/month";
@@ -171,6 +206,10 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
       <Text style={styles.sub}>Manage your Jawabify plan, payment method, and invoices.</Text>
       {loading ? (
         <Text style={styles.sub}>Loading subscription\u2026</Text>
+      ) : !subscription && isShopify ? (
+        <Text style={styles.sub}>
+          Your plan is billed through Shopify. Approve the plan in Shopify. Card payments are not used for this account.
+        </Text>
       ) : !subscription ? (
         <View style={styles.subscribe}>
           <View style={styles.pill}>
@@ -251,7 +290,26 @@ export function BillingCard({ highlight = false }: { highlight?: boolean }) {
           <Text style={styles.sub}>
             {status === 'trialing' ? 'Trial ends' : willCancel ? 'Access until' : 'Next charge'}: {formatDate(periodEnd)}
           </Text>
-          {canUpgradeToGrowth && isTenantAdmin ? (
+          {approvalUrl ? (
+            <View style={styles.billedBox}>
+              <Text style={styles.billedTitle}>
+                To renew {approvalPlan}, approve that same plan in Shopify. Your plan stays canceled until you approve it.
+              </Text>
+              <Button title="Approve on Shopify" onPress={() => Linking.openURL(approvalUrl)} />
+              <Button
+                title="Copy link"
+                variant="outline"
+                onPress={async () => {
+                  await Clipboard.setStringAsync(approvalUrl);
+                  toast.success('Link copied');
+                }}
+              />
+            </View>
+          ) : null}
+          {isTenantAdmin && (willCancel || status === 'canceled') ? (
+            <Button title={renewing ? 'Renewing…' : 'Renew plan'} loading={renewing} onPress={renewPlan} />
+          ) : null}
+          {canUpgradeToGrowth && isTenantAdmin && !isShopify ? (
             <>
               <Button
                 title={opening ? 'Opening\u2026' : 'Upgrade to Growth'}
